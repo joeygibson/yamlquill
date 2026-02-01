@@ -356,6 +356,36 @@ impl YamlTree {
 
         Ok(())
     }
+
+    /// Get the parent path of the given path
+    /// Returns None if path is root or invalid
+    pub fn get_parent_path(&self, path: &str) -> Option<String> {
+        if path.is_empty() || path == "$" {
+            return None;
+        }
+
+        // Find last separator
+        if let Some(last_dot) = path.rfind('.') {
+            Some(path[..last_dot].to_string())
+        } else if let Some(last_bracket) = path.rfind('[') {
+            if last_bracket == 0 {
+                None // Root array
+            } else {
+                Some(path[..last_bracket].to_string())
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Get depth of a path (number of nesting levels)
+    pub fn get_depth(&self, path: &str) -> usize {
+        if path.is_empty() || path == "$" {
+            return 0;
+        }
+
+        path.chars().filter(|c| *c == '.' || *c == '[').count()
+    }
 }
 
 #[cfg(test)]
@@ -377,5 +407,26 @@ mod tests {
         let tree = YamlTree::new(root);
 
         assert_eq!(tree.original_source(), None);
+    }
+
+    #[test]
+    fn test_get_parent_path() {
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
+
+        assert_eq!(tree.get_parent_path("$"), None);
+        assert_eq!(tree.get_parent_path("name"), None);
+        assert_eq!(tree.get_parent_path("config.timeout"), Some("config".to_string()));
+        assert_eq!(tree.get_parent_path("users[0]"), Some("users".to_string()));
+        assert_eq!(tree.get_parent_path("users[0].name"), Some("users[0]".to_string()));
+    }
+
+    #[test]
+    fn test_get_depth() {
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
+
+        assert_eq!(tree.get_depth("$"), 0);
+        assert_eq!(tree.get_depth("name"), 0);
+        assert_eq!(tree.get_depth("config.timeout"), 1);
+        assert_eq!(tree.get_depth("users[0].name"), 2);
     }
 }
