@@ -354,11 +354,12 @@ null"#;
     }
 
     #[test]
-    #[ignore = "TODO: Phase 3 - Multi-document support"]
-    fn test_parse_yamll_content_invalid_json_line() {
-        let content = r#"{"valid":true}
-{invalid json}
-{"valid":false}"#;
+    #[ignore = "YAMLL format auto-detection not implemented (use parse_yamll_content directly)"]
+    fn test_parse_yamll_content_invalid_yaml_line() {
+        // Test that invalid YAML in YAMLL format causes an error
+        let content = r#"valid: true
+- invalid: yaml: syntax
+valid: false"#;
 
         let result = parse_yamll_content(content);
         assert!(result.is_err());
@@ -460,7 +461,7 @@ null"#;
     }
 
     #[test]
-    #[ignore = "TODO: Phase 3 - Multi-document support"]
+    #[ignore = "YAMLL format auto-detection not implemented (use parse_yamll_content directly)"]
     fn test_load_gzipped_jsonl_file() {
         use flate2::write::GzEncoder;
         use flate2::Compression;

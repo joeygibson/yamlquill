@@ -1110,7 +1110,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TODO: Phase 3 - Multi-document support"]
+    #[ignore = "YAMLL format auto-detection not implemented (use save_yamll directly)"]
     fn test_save_yamll_as_gzipped() {
         use crate::document::node::YamlValue;
         use flate2::read::GzDecoder;
