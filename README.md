@@ -12,6 +12,9 @@ A terminal-based structural YAML editor with vim-style keybindings.
 
 ## Status
 
+[![CI](https://github.com/joeygibson/yamlquill/workflows/CI/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/ci.yml)
+[![Release](https://github.com/joeygibson/yamlquill/workflows/Release/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/release.yml)
+
 **Phase 1 Complete** - Core functionality implemented. The editor currently supports:
 - YAML file loading and editing
 - Tree-based navigation with vim keybindings
