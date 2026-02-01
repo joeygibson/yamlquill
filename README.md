@@ -15,7 +15,7 @@ A terminal-based structural YAML editor with vim-style keybindings.
 [![CI](https://github.com/joeygibson/yamlquill/workflows/CI/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/ci.yml)
 [![Release](https://github.com/joeygibson/yamlquill/workflows/Release/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/release.yml)
 
-**Phase 1 Complete** - Core functionality implemented. The editor currently supports:
+**Phase 2c Complete** - Core editing with bug fixes. The editor currently supports:
 - YAML file loading and editing
 - Tree-based navigation with vim keybindings
 - Advanced navigation (sibling jumping, screen positioning, count prefixes)
@@ -32,11 +32,19 @@ A terminal-based structural YAML editor with vim-style keybindings.
 - Mouse/trackpad scrolling support
 - Gzip compression support (transparent `.yaml.gz` handling)
 
+**Recent improvements (Phase 2c):**
+- Fixed critical bug: multi-line string style preservation during editing (Literal `|` and Folded `>` strings maintain their style)
+- Added input validation to prevent invalid edits
+- Comprehensive test coverage (315 tests)
+
+**Known limitations (v1.0):**
+- Multi-line string styles are preserved in-memory but not yet in serialization (saved files use plain strings with `\n`)
+- Format preservation for unmodified nodes is limited
+
 **Planned for future phases:**
 - Multi-document YAML files (multiple `---` separated documents)
 - Anchor and alias support (`&anchor`, `*alias`)
-- Multi-line string editing with style preservation (`|` literal, `>` folded)
-- Format preservation for unmodified nodes
+- Full multi-line string serialization with style preservation
 - Comment support (v2.0+)
 
 See [CLAUDE.md](CLAUDE.md) for detailed feature list and developer documentation.
