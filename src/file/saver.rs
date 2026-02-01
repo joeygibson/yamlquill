@@ -738,25 +738,25 @@ mod tests {
 
     #[test]
     fn test_serialize_number() {
-        let node = YamlNode::new(YamlValue::Number(42.0));
+        let node = YamlNode::new(YamlValue::Number(YamlNumber::Float(42.0)));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "42");
 
-        let node = YamlNode::new(YamlValue::Number(2.5));
+        let node = YamlNode::new(YamlValue::Number(YamlNumber::Float(2.5)));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "2.5");
     }
 
     #[test]
     fn test_serialize_string() {
-        let node = YamlNode::new(YamlValue::String("hello".to_string()));
+        let node = YamlNode::new(YamlValue::String(YamlString::Plain("hello".to_string())));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "\"hello\"");
     }
 
     #[test]
     fn test_serialize_empty_object() {
-        let node = YamlNode::new(YamlValue::Object(vec![]));
+        let node = YamlNode::new(YamlValue::Object(IndexMap::new()));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "{}");
     }
@@ -770,10 +770,8 @@ mod tests {
 
     #[test]
     fn test_serialize_simple_object() {
-        let obj = vec![(
-            "name".to_string(),
-            YamlNode::new(YamlValue::String("Alice".to_string())),
-        )];
+        let mut obj = IndexMap::new();
+        obj.insert("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))));
         let node = YamlNode::new(YamlValue::Object(obj));
         let result = serialize_node(&node, 2, 0);
         // Small scalar objects use compact formatting
@@ -783,9 +781,9 @@ mod tests {
     #[test]
     fn test_serialize_simple_array() {
         let arr = vec![
-            YamlNode::new(YamlValue::Number(1.0)),
-            YamlNode::new(YamlValue::Number(2.0)),
-            YamlNode::new(YamlValue::Number(3.0)),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(3.0))),
         ];
         let node = YamlNode::new(YamlValue::Array(arr));
         let result = serialize_node(&node, 2, 0);
@@ -795,8 +793,10 @@ mod tests {
 
     #[test]
     fn test_serialize_nested_object() {
-        let inner = vec![("age".to_string(), YamlNode::new(YamlValue::Number(30.0)))];
-        let outer = vec![("user".to_string(), YamlNode::new(YamlValue::Object(inner)))];
+        let mut inner = IndexMap::new();
+        inner.insert("age".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(30.0))));
+        let mut outer = IndexMap::new();
+        outer.insert("user".to_string(), YamlNode::new(YamlValue::Object(inner)));
         let node = YamlNode::new(YamlValue::Object(outer));
         let result = serialize_node(&node, 2, 0);
         // Inner object with single scalar value uses compact formatting
@@ -816,8 +816,8 @@ mod tests {
     #[test]
     fn test_compact_array_with_scalars() {
         let arr = vec![
-            YamlNode::new(YamlValue::Number(1.0)),
-            YamlNode::new(YamlValue::String("test".to_string())),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))),
+            YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))),
             YamlNode::new(YamlValue::Boolean(true)),
             YamlNode::new(YamlValue::Null),
         ];
@@ -828,14 +828,10 @@ mod tests {
 
     #[test]
     fn test_compact_object_with_scalars() {
-        let obj = vec![
-            ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-            (
-                "b".to_string(),
-                YamlNode::new(YamlValue::String("test".to_string())),
-            ),
-            ("c".to_string(), YamlNode::new(YamlValue::Boolean(false))),
-        ];
+        let mut obj = IndexMap::new();
+        obj.insert("a".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))));
+        obj.insert("b".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))));
+        obj.insert("c".to_string(), YamlNode::new(YamlValue::Boolean(false)));
         let node = YamlNode::new(YamlValue::Object(obj));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "{\"a\": 1, \"b\": \"test\", \"c\": false}");
@@ -844,10 +840,8 @@ mod tests {
     #[test]
     fn test_nested_containers_use_multiline() {
         // Array containing an object should use multi-line formatting
-        let inner = vec![(
-            "key".to_string(),
-            YamlNode::new(YamlValue::String("value".to_string())),
-        )];
+        let mut inner = IndexMap::new();
+        inner.insert("key".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string()))));
         let arr = vec![YamlNode::new(YamlValue::Object(inner))];
         let node = YamlNode::new(YamlValue::Array(arr));
         let result = serialize_node(&node, 2, 0);
@@ -861,7 +855,7 @@ mod tests {
     fn test_long_compact_array_uses_multiline() {
         // Create an array that would exceed 80 characters in compact format
         let arr: Vec<YamlNode> = (0..30)
-            .map(|i| YamlNode::new(YamlValue::Number(i as f64)))
+            .map(|i| YamlNode::new(YamlValue::Number(YamlNumber::Float(i as f64))))
             .collect();
         let node = YamlNode::new(YamlValue::Array(arr));
         let result = serialize_node(&node, 2, 0);
@@ -885,7 +879,8 @@ mod tests {
 }"#;
 
         // Parse
-        let tree = parse_yaml(original_json).unwrap();
+        let root_node = parse_yaml(original_json).unwrap();
+        let tree = YamlTree::new(root_node);
         let config = Config {
             preserve_formatting: true,
             ..Default::default()
@@ -912,11 +907,12 @@ mod tests {
         let original_json = r#"{"name":    "Alice"}"#; // Odd spacing
 
         // Parse
-        let mut tree = parse_yaml(original_json).unwrap();
+        let root_node = parse_yaml(original_json).unwrap();
+        let mut tree = YamlTree::new(root_node);
 
         // Modify a value
         if let YamlValue::Object(ref mut entries) = tree.root_mut().value_mut() {
-            *entries[0].1.value_mut() = YamlValue::String("Bob".to_string());
+            *entries.get_index_mut(0).unwrap().1.value_mut() = YamlValue::String(YamlString::Plain("Bob".to_string()));
         }
 
         let config = Config::default();
@@ -946,7 +942,8 @@ mod tests {
 }"#;
 
         // Parse
-        let tree = parse_yaml(original_json).unwrap();
+        let root_node = parse_yaml(original_json).unwrap();
+        let tree = YamlTree::new(root_node);
 
         // Disable format preservation
         let config = Config {
@@ -988,21 +985,21 @@ mod tests {
   }
 }"#;
 
-        let mut tree = parse_yaml(original_json).unwrap();
+        let root_node = parse_yaml(original_json).unwrap();
+        let mut tree = YamlTree::new(root_node);
 
         // Navigate to company object and modify it
         if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
-            if let YamlValue::Object(ref mut company_entries) = root_entries[0].1.value_mut() {
-                // Rename "name" to "companyName" by modifying the first entry
-                company_entries[0].0 = "companyName".to_string();
+            if let YamlValue::Object(ref mut company_entries) = root_entries.get_index_mut(0).unwrap().1.value_mut() {
+                // Rename "name" to "companyName" by removing old and inserting new
+                if let Some((_, value)) = company_entries.shift_remove_entry("name") {
+                    company_entries.insert("companyName".to_string(), value);
+                }
 
                 // Add a new field "employees": 23
                 company_entries.insert(
-                    1,
-                    (
-                        "employees".to_string(),
-                        crate::document::node::YamlNode::new(YamlValue::Number(23.0)),
-                    ),
+                    "employees".to_string(),
+                    crate::document::node::YamlNode::new(YamlValue::Number(YamlNumber::Float(23.0))),
                 );
             }
         }
@@ -1080,7 +1077,8 @@ mod tests {
 
         // Create JSON tree
         let json = r#"{"name": "Alice", "age": 30}"#;
-        let tree = parse_yaml(json).unwrap();
+        let root_node = parse_yaml(json).unwrap();
+        let tree = YamlTree::new(root_node);
         let config = Config::default();
 
         // Save as .json.gz
@@ -1109,18 +1107,21 @@ mod tests {
 
         // Create multi-document YAML tree manually
         let lines = vec![
-            YamlNode::new(YamlValue::Object(vec![(
-                "id".to_string(),
-                YamlNode::new(YamlValue::Number(1.0)),
-            )])),
-            YamlNode::new(YamlValue::Object(vec![(
-                "id".to_string(),
-                YamlNode::new(YamlValue::Number(2.0)),
-            )])),
-            YamlNode::new(YamlValue::Object(vec![(
-                "id".to_string(),
-                YamlNode::new(YamlValue::Number(3.0)),
-            )])),
+            {
+                let mut obj = IndexMap::new();
+                obj.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))));
+                YamlNode::new(YamlValue::Object(obj))
+            },
+            {
+                let mut obj = IndexMap::new();
+                obj.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))));
+                YamlNode::new(YamlValue::Object(obj))
+            },
+            {
+                let mut obj = IndexMap::new();
+                obj.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(3.0))));
+                YamlNode::new(YamlValue::Object(obj))
+            },
         ];
         let root = YamlNode::new(YamlValue::MultiDoc(lines));
         let tree = YamlTree::new(root);
@@ -1174,7 +1175,8 @@ mod tests {
 
         // Create and save as .json
         let json = r#"{"test": "value"}"#;
-        let tree = parse_yaml(json).unwrap();
+        let root_node = parse_yaml(json).unwrap();
+        let tree = YamlTree::new(root_node);
         let config = Config::default();
 
         let temp_file = NamedTempFile::new().unwrap();
@@ -1206,7 +1208,8 @@ mod tests {
 
         // Create and save as .json.gz
         let json = r#"{"test": "value"}"#;
-        let tree = parse_yaml(json).unwrap();
+        let root_node = parse_yaml(json).unwrap();
+        let tree = YamlTree::new(root_node);
         let config = Config::default();
 
         let temp_file = NamedTempFile::new().unwrap();
@@ -1244,7 +1247,8 @@ mod tests {
 
         // Create initial .json.gz file
         let json = r#"{"version": 1}"#;
-        let tree = parse_yaml(json).unwrap();
+        let root_node = parse_yaml(json).unwrap();
+        let tree = YamlTree::new(root_node);
         let config = Config::default();
 
         let temp_file = NamedTempFile::new().unwrap();
@@ -1253,7 +1257,8 @@ mod tests {
 
         // Modify and save with backup enabled
         let json2 = r#"{"version": 2}"#;
-        let tree2 = parse_yaml(json2).unwrap();
+        let root_node2 = parse_yaml(json2).unwrap();
+        let tree2 = YamlTree::new(root_node2);
         let config_with_backup = Config {
             create_backup: true,
             ..Default::default()

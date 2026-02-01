@@ -1850,7 +1850,7 @@ mod tests {
         use tempfile::TempDir;
 
         let mut handler = InputHandler::new();
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Number(42.0)));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Number(YamlNumber::Float(42.0))));
         let mut state = EditorState::new_with_default_theme(tree);
 
         // Create a temporary directory
@@ -1891,7 +1891,7 @@ mod tests {
         use tempfile::TempDir;
 
         let mut handler = InputHandler::new();
-        let tree = YamlTree::new(YamlNode::new(YamlValue::String("test".to_string())));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))));
         let mut state = EditorState::new_with_default_theme(tree);
 
         // Create a temporary directory

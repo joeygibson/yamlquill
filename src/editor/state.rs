@@ -50,6 +50,9 @@ use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
 use crate::document::tree::YamlTree;
 use crate::ui::tree_view::TreeViewState;
 
+#[cfg(test)]
+use indexmap::IndexMap;
+
 /// Type of active search.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchType {
@@ -4468,15 +4471,11 @@ mod tests {
     #[test]
     fn test_get_current_path_dot_notation() {
         // Create tree: {"users": [{"name": "Alice"}]}
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "users".to_string(),
-            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
-                vec![(
-                    "name".to_string(),
-                    YamlNode::new(YamlValue::String("Alice".to_string())),
-                )],
-            ))])),
-        )])));
+        let mut inner_obj = IndexMap::new();
+        inner_obj.insert("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))));
+        let mut outer_obj = IndexMap::new();
+        outer_obj.insert("users".to_string(), YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(inner_obj))])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(outer_obj)));
 
         let mut state = EditorState::new_with_default_theme(tree);
 
@@ -4499,15 +4498,13 @@ mod tests {
     #[test]
     fn test_get_current_path_jsonl() {
         // Create JSONL tree with lines: [{"id": 1}, {"id": 2}]
+        let mut obj1 = IndexMap::new();
+        obj1.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))));
+        let mut obj2 = IndexMap::new();
+        obj2.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))));
         let tree = YamlTree::new(YamlNode::new(YamlValue::MultiDoc(vec![
-            YamlNode::new(YamlValue::Object(vec![(
-                "id".to_string(),
-                YamlNode::new(YamlValue::Number(1.0)),
-            )])),
-            YamlNode::new(YamlValue::Object(vec![(
-                "id".to_string(),
-                YamlNode::new(YamlValue::Number(2.0)),
-            )])),
+            YamlNode::new(YamlValue::Object(obj1)),
+            YamlNode::new(YamlValue::Object(obj2)),
         ])));
 
         let mut state = EditorState::new_with_default_theme(tree);
@@ -4547,10 +4544,9 @@ mod tests {
 
     #[test]
     fn test_yank_to_named_register() {
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "key".to_string(),
-            YamlNode::new(YamlValue::String("value".to_string())),
-        )])));
+        let mut obj = IndexMap::new();
+        obj.insert("key".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string()))));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
 
         let mut state = EditorState::new_with_default_theme(tree);
         // Cursor starts at first visible line (the "key" field at path [0])
@@ -4568,7 +4564,7 @@ mod tests {
     #[test]
     fn test_paste_from_named_register() {
         let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![YamlNode::new(
-            YamlValue::String("existing".to_string()),
+            YamlValue::String(YamlString::Plain("existing".to_string())),
         )])));
 
         let mut state = EditorState::new_with_default_theme(tree);
@@ -4580,7 +4576,7 @@ mod tests {
         state.move_cursor_down();
 
         // Manually populate register 'a'
-        let node = YamlNode::new(YamlValue::String("test".to_string()));
+        let node = YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string())));
         let content = crate::editor::registers::RegisterContent::new(vec![node], vec![None]);
         state.registers.set_named('a', content);
 
@@ -4594,7 +4590,7 @@ mod tests {
     #[test]
     fn test_paste_from_numbered_register() {
         let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![YamlNode::new(
-            YamlValue::String("existing".to_string()),
+            YamlValue::String(YamlString::Plain("existing".to_string())),
         )])));
 
         let mut state = EditorState::new_with_default_theme(tree);
@@ -4606,7 +4602,7 @@ mod tests {
         state.move_cursor_down();
 
         // Manually populate register "0
-        let node = YamlNode::new(YamlValue::Number(42.0));
+        let node = YamlNode::new(YamlValue::Number(YamlNumber::Float(42.0)));
         let content = crate::editor::registers::RegisterContent::new(vec![node], vec![None]);
         state.registers.set_numbered(0, content);
 
@@ -4620,8 +4616,8 @@ mod tests {
     #[test]
     fn test_delete_pushes_to_history() {
         let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![
-            YamlNode::new(YamlValue::Number(1.0)),
-            YamlNode::new(YamlValue::Number(2.0)),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))),
         ])));
 
         let mut state = EditorState::new_with_default_theme(tree);
