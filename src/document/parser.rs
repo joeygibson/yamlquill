@@ -22,6 +22,7 @@
 use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
+use serde::Deserialize;
 use serde_yaml::{self, Value};
 
 /// Parses a YAML string into a `YamlNode`.
@@ -163,10 +164,8 @@ fn convert_value(value: Value) -> Result<YamlNode> {
 
 /// Parses YAML with automatic single/multi-document detection.
 ///
-/// # Phase 1 Implementation
-///
-/// Currently just delegates to `parse_yaml()` for single-document support.
-/// Phase 3 will add true multi-document support using `serde_yaml::Deserializer`.
+/// Detects whether the input contains multiple documents (separated by `---`)
+/// and returns either a single YamlNode or a MultiDoc variant containing all documents.
 ///
 /// # Arguments
 ///
@@ -175,12 +174,63 @@ fn convert_value(value: Value) -> Result<YamlNode> {
 /// # Returns
 ///
 /// Returns a `Result` containing:
-/// - `Ok(YamlNode)` if parsing succeeds
+/// - `Ok(YamlNode)` with single document or MultiDoc variant
 /// - `Err(anyhow::Error)` if the YAML is malformed
+///
+/// # Example
+///
+/// ```
+/// use yamlquill::document::parser::parse_yaml_auto;
+///
+/// // Single document
+/// let single = parse_yaml_auto("name: Alice").unwrap();
+///
+/// // Multi-document
+/// let multi = parse_yaml_auto("---\nname: Alice\n---\nname: Bob").unwrap();
+/// ```
 pub fn parse_yaml_auto(yaml_str: &str) -> Result<YamlNode> {
-    // V1: Single document only
-    // Phase 3 will add multi-document support
-    parse_yaml(yaml_str)
+    // Try to parse as multi-document first
+    let documents = parse_yaml_multi_doc(yaml_str)?;
+
+    if documents.len() == 1 {
+        // Single document - return it directly
+        Ok(documents.into_iter().next().unwrap())
+    } else {
+        // Multiple documents - wrap in MultiDoc
+        Ok(YamlNode::new(YamlValue::MultiDoc(documents)))
+    }
+}
+
+/// Parses YAML that may contain multiple documents separated by `---`.
+///
+/// Returns a Vec of YamlNodes, one for each document. For single-document
+/// YAML, returns a Vec with one element.
+///
+/// # Arguments
+///
+/// * `yaml_str` - A string slice containing valid YAML
+///
+/// # Returns
+///
+/// Returns a `Result` containing:
+/// - `Ok(Vec<YamlNode>)` with all parsed documents
+/// - `Err(anyhow::Error)` if the YAML is malformed
+fn parse_yaml_multi_doc(yaml_str: &str) -> Result<Vec<YamlNode>> {
+    let mut documents = Vec::new();
+
+    // Use serde_yaml's Deserializer to handle multiple documents
+    for document in serde_yaml::Deserializer::from_str(yaml_str) {
+        let value = Value::deserialize(document).context("Failed to deserialize YAML document")?;
+        let node = convert_value(value)?;
+        documents.push(node);
+    }
+
+    // If no documents were parsed, return an error
+    if documents.is_empty() {
+        anyhow::bail!("No valid YAML documents found");
+    }
+
+    Ok(documents)
 }
 
 /// Converts a `serde_yaml::Value` reference into a `YamlNode`.

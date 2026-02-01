@@ -229,7 +229,7 @@ fn write_file_atomic<P: AsRef<Path>>(path: P, data: &[u8], compress: bool) -> Re
 
 /// Saves a multi-document YAML document to a file.
 ///
-/// Each line is saved as a separate YAML object (one per line).
+/// Documents are separated by `---` directives as per YAML 1.2 spec.
 fn save_yamll<P: AsRef<Path>>(
     path: P,
     tree: &YamlTree,
@@ -245,29 +245,30 @@ fn save_yamll<P: AsRef<Path>>(
 
     let mut output = String::new();
 
-    if let YamlValue::MultiDoc(lines) = tree.root().value() {
-        for (i, node) in lines.iter().enumerate() {
+    if let YamlValue::MultiDoc(documents) = tree.root().value() {
+        for (i, node) in documents.iter().enumerate() {
+            // Add document separator before each document
+            output.push_str("---\n");
+
             // Convert to serde_yaml::Value
             let value = convert_to_serde_value(node)
-                .with_context(|| format!("Failed to convert line {} to YAML", i + 1))?;
+                .with_context(|| format!("Failed to convert document {} to YAML", i + 1))?;
 
-            // Serialize to compact single-line YAML (JSON style)
-            let line = serde_yaml::to_string(&value)
-                .with_context(|| format!("Failed to serialize line {}", i + 1))?;
+            // Serialize to YAML with proper formatting
+            let yaml = serde_yaml::to_string(&value)
+                .with_context(|| format!("Failed to serialize document {}", i + 1))?;
 
-            // Remove trailing newline from serde_yaml output
-            let line = line.trim_end();
-
-            // Validate each line is valid YAML
-            serde_yaml::from_str::<serde_yaml::Value>(line).with_context(|| {
+            // Validate the serialized YAML
+            serde_yaml::from_str::<serde_yaml::Value>(&yaml).with_context(|| {
                 format!(
-                    "Generated invalid YAML at line {} - this is a bug in yamlquill's serialization",
+                    "Generated invalid YAML at document {} - this is a bug in yamlquill's serialization",
                     i + 1
                 )
             })?;
 
-            output.push_str(line);
-            output.push('\n');
+            output.push_str(&yaml);
+
+            // serde_yaml::to_string adds a trailing newline, so we don't need to add another
         }
     }
 
