@@ -23,7 +23,7 @@ pub fn render_help_overlay(f: &mut Frame, colors: &ThemeColors, scroll: usize) {
     f.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" JSONQuill Help ")
+        .title(" YAMLQuill Help ")
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(colors.info))
@@ -349,12 +349,12 @@ pub fn render_help_overlay(f: &mut Frame, colors: &ThemeColors, scroll: usize) {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            "JSONPath Search (Structural)",
+            "YAMLPath Search (Structural)",
             Style::default().fg(colors.key).add_modifier(Modifier::BOLD),
         )]),
         Line::from(vec![
             Span::styled("  :path <query> ", Style::default().fg(colors.number)),
-            Span::raw("JSONPath search (e.g., :path $.users[*].name)"),
+            Span::raw("YAMLPath search (e.g., :path $.users[*].name)"),
         ]),
         Line::from(vec![
             Span::styled("  :jp <query>   ", Style::default().fg(colors.number)),

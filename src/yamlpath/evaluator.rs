@@ -1,16 +1,16 @@
 use super::ast::PathSegment;
-use crate::document::node::{JsonNode, JsonValue};
+use crate::document::node::{YamlNode, YamlValue};
 
 pub struct Evaluator<'a> {
-    root: &'a JsonNode,
+    root: &'a YamlNode,
 }
 
 impl<'a> Evaluator<'a> {
-    pub fn new(root: &'a JsonNode) -> Self {
+    pub fn new(root: &'a YamlNode) -> Self {
         Evaluator { root }
     }
 
-    /// Evaluates a JSONPath query and returns matching node paths.
+    /// Evaluates a YAMLPath query and returns matching node paths.
     /// Each path is a Vec<usize> representing indices in the tree.
     pub fn evaluate_paths(&self, segments: &[PathSegment]) -> Vec<Vec<usize>> {
         if segments.is_empty() {
@@ -18,7 +18,7 @@ impl<'a> Evaluator<'a> {
         }
 
         // Start with root path
-        let mut current: Vec<(Vec<usize>, &JsonNode)> = vec![(vec![], self.root)];
+        let mut current: Vec<(Vec<usize>, &YamlNode)> = vec![(vec![], self.root)];
 
         // Process each segment
         for segment in segments {
@@ -36,10 +36,10 @@ impl<'a> Evaluator<'a> {
     /// Evaluates a single segment and returns (path, node) pairs.
     fn evaluate_segment_with_path(
         &self,
-        node: &'a JsonNode,
+        node: &'a YamlNode,
         segment: &PathSegment,
         current_path: &[usize],
-    ) -> Vec<(Vec<usize>, &'a JsonNode)> {
+    ) -> Vec<(Vec<usize>, &'a YamlNode)> {
         match segment {
             PathSegment::Root => vec![(vec![], self.root)],
             PathSegment::Current => vec![(current_path.to_vec(), node)],
@@ -64,11 +64,11 @@ impl<'a> Evaluator<'a> {
 
     fn find_child_with_path(
         &self,
-        node: &'a JsonNode,
+        node: &'a YamlNode,
         name: &str,
         current_path: &[usize],
-    ) -> Vec<(Vec<usize>, &'a JsonNode)> {
-        if let JsonValue::Object(props) = node.value() {
+    ) -> Vec<(Vec<usize>, &'a YamlNode)> {
+        if let YamlValue::Object(props) = node.value() {
             for (idx, (key, child)) in props.iter().enumerate() {
                 if key == name {
                     let mut new_path = current_path.to_vec();
@@ -82,11 +82,11 @@ impl<'a> Evaluator<'a> {
 
     fn get_array_element_with_path(
         &self,
-        node: &'a JsonNode,
+        node: &'a YamlNode,
         idx: isize,
         current_path: &[usize],
-    ) -> Vec<(Vec<usize>, &'a JsonNode)> {
-        if let JsonValue::Array(items) = node.value() {
+    ) -> Vec<(Vec<usize>, &'a YamlNode)> {
+        if let YamlValue::Array(items) = node.value() {
             let len = items.len() as isize;
             let normalized_idx = if idx < 0 { len + idx } else { idx };
 
@@ -101,11 +101,11 @@ impl<'a> Evaluator<'a> {
 
     fn get_all_children_with_path(
         &self,
-        node: &'a JsonNode,
+        node: &'a YamlNode,
         current_path: &[usize],
-    ) -> Vec<(Vec<usize>, &'a JsonNode)> {
+    ) -> Vec<(Vec<usize>, &'a YamlNode)> {
         match node.value() {
-            JsonValue::Object(props) => props
+            YamlValue::Object(props) => props
                 .iter()
                 .enumerate()
                 .map(|(idx, (_, child))| {
@@ -114,7 +114,7 @@ impl<'a> Evaluator<'a> {
                     (new_path, child)
                 })
                 .collect(),
-            JsonValue::Array(items) => items
+            YamlValue::Array(items) => items
                 .iter()
                 .enumerate()
                 .map(|(idx, child)| {
@@ -123,7 +123,7 @@ impl<'a> Evaluator<'a> {
                     (new_path, child)
                 })
                 .collect(),
-            JsonValue::JsonlRoot(lines) => lines
+            YamlValue::MultiDoc(lines) => lines
                 .iter()
                 .enumerate()
                 .map(|(idx, child)| {
@@ -138,12 +138,12 @@ impl<'a> Evaluator<'a> {
 
     fn get_slice_with_path(
         &self,
-        node: &'a JsonNode,
+        node: &'a YamlNode,
         start: Option<isize>,
         end: Option<isize>,
         current_path: &[usize],
-    ) -> Vec<(Vec<usize>, &'a JsonNode)> {
-        if let JsonValue::Array(items) = node.value() {
+    ) -> Vec<(Vec<usize>, &'a YamlNode)> {
+        if let YamlValue::Array(items) = node.value() {
             let len = items.len() as isize;
 
             // Normalize start
@@ -177,22 +177,22 @@ impl<'a> Evaluator<'a> {
 
     fn recursive_descent_with_path(
         &self,
-        node: &'a JsonNode,
+        node: &'a YamlNode,
         prop: Option<&str>,
         current_path: &[usize],
-    ) -> Vec<(Vec<usize>, &'a JsonNode)> {
+    ) -> Vec<(Vec<usize>, &'a YamlNode)> {
         let mut results = Vec::new();
 
         // Helper to recursively walk the tree
         fn walk<'a>(
-            node: &'a JsonNode,
+            node: &'a YamlNode,
             prop: Option<&str>,
             current_path: &[usize],
-            results: &mut Vec<(Vec<usize>, &'a JsonNode)>,
+            results: &mut Vec<(Vec<usize>, &'a YamlNode)>,
         ) {
             // If property name specified, only match that property
             if let Some(name) = prop {
-                if let JsonValue::Object(props) = node.value() {
+                if let YamlValue::Object(props) = node.value() {
                     for (idx, (key, child)) in props.iter().enumerate() {
                         if key == name {
                             let mut new_path = current_path.to_vec();
@@ -203,7 +203,7 @@ impl<'a> Evaluator<'a> {
                         child_path.push(idx);
                         walk(child, prop, &child_path, results);
                     }
-                } else if let JsonValue::Array(items) = node.value() {
+                } else if let YamlValue::Array(items) = node.value() {
                     for (idx, item) in items.iter().enumerate() {
                         let mut child_path = current_path.to_vec();
                         child_path.push(idx);
@@ -213,7 +213,7 @@ impl<'a> Evaluator<'a> {
             } else {
                 // No property name - match all nodes
                 match node.value() {
-                    JsonValue::Object(props) => {
+                    YamlValue::Object(props) => {
                         for (idx, (_, child)) in props.iter().enumerate() {
                             let mut new_path = current_path.to_vec();
                             new_path.push(idx);
@@ -221,7 +221,7 @@ impl<'a> Evaluator<'a> {
                             walk(child, prop, &new_path, results);
                         }
                     }
-                    JsonValue::Array(items) => {
+                    YamlValue::Array(items) => {
                         for (idx, item) in items.iter().enumerate() {
                             let mut new_path = current_path.to_vec();
                             new_path.push(idx);
@@ -238,13 +238,13 @@ impl<'a> Evaluator<'a> {
         results
     }
 
-    pub fn evaluate(&self, segments: &[PathSegment]) -> Vec<&'a JsonNode> {
+    pub fn evaluate(&self, segments: &[PathSegment]) -> Vec<&'a YamlNode> {
         if segments.is_empty() {
             return vec![];
         }
 
         // Start with root
-        let mut current: Vec<&JsonNode> = vec![self.root];
+        let mut current: Vec<&YamlNode> = vec![self.root];
 
         // Process each segment
         for segment in segments {
@@ -258,7 +258,7 @@ impl<'a> Evaluator<'a> {
         current
     }
 
-    fn evaluate_segment(&self, node: &'a JsonNode, segment: &PathSegment) -> Vec<&'a JsonNode> {
+    fn evaluate_segment(&self, node: &'a YamlNode, segment: &PathSegment) -> Vec<&'a YamlNode> {
         match segment {
             PathSegment::Root => vec![self.root],
             PathSegment::Current => vec![node],
@@ -277,8 +277,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn find_child(&self, node: &'a JsonNode, name: &str) -> Vec<&'a JsonNode> {
-        if let JsonValue::Object(props) = node.value() {
+    fn find_child(&self, node: &'a YamlNode, name: &str) -> Vec<&'a YamlNode> {
+        if let YamlValue::Object(props) = node.value() {
             for (key, child) in props {
                 if key == name {
                     return vec![child];
@@ -288,8 +288,8 @@ impl<'a> Evaluator<'a> {
         vec![]
     }
 
-    fn get_array_element(&self, node: &'a JsonNode, idx: isize) -> Vec<&'a JsonNode> {
-        if let JsonValue::Array(items) = node.value() {
+    fn get_array_element(&self, node: &'a YamlNode, idx: isize) -> Vec<&'a YamlNode> {
+        if let YamlValue::Array(items) = node.value() {
             let len = items.len() as isize;
             let normalized_idx = if idx < 0 { len + idx } else { idx };
 
@@ -300,22 +300,22 @@ impl<'a> Evaluator<'a> {
         vec![]
     }
 
-    fn get_all_children(&self, node: &'a JsonNode) -> Vec<&'a JsonNode> {
+    fn get_all_children(&self, node: &'a YamlNode) -> Vec<&'a YamlNode> {
         match node.value() {
-            JsonValue::Object(props) => props.iter().map(|(_, child)| child).collect(),
-            JsonValue::Array(items) => items.iter().collect(),
-            JsonValue::JsonlRoot(lines) => lines.iter().collect(),
+            YamlValue::Object(props) => props.iter().map(|(_, child)| child).collect(),
+            YamlValue::Array(items) => items.iter().collect(),
+            YamlValue::MultiDoc(lines) => lines.iter().collect(),
             _ => vec![],
         }
     }
 
     fn get_slice(
         &self,
-        node: &'a JsonNode,
+        node: &'a YamlNode,
         start: Option<isize>,
         end: Option<isize>,
-    ) -> Vec<&'a JsonNode> {
-        if let JsonValue::Array(items) = node.value() {
+    ) -> Vec<&'a YamlNode> {
+        if let YamlValue::Array(items) = node.value() {
             let len = items.len() as isize;
 
             // Normalize start
@@ -339,21 +339,21 @@ impl<'a> Evaluator<'a> {
         vec![]
     }
 
-    fn recursive_descent(&self, node: &'a JsonNode, prop: Option<&str>) -> Vec<&'a JsonNode> {
+    fn recursive_descent(&self, node: &'a YamlNode, prop: Option<&str>) -> Vec<&'a YamlNode> {
         let mut results = Vec::new();
 
         // Helper to recursively walk the tree
-        fn walk<'a>(node: &'a JsonNode, prop: Option<&str>, results: &mut Vec<&'a JsonNode>) {
+        fn walk<'a>(node: &'a YamlNode, prop: Option<&str>, results: &mut Vec<&'a YamlNode>) {
             // If property name specified, only match that property
             if let Some(name) = prop {
-                if let JsonValue::Object(props) = node.value() {
+                if let YamlValue::Object(props) = node.value() {
                     for (key, child) in props {
                         if key == name {
                             results.push(child);
                         }
                         walk(child, prop, results);
                     }
-                } else if let JsonValue::Array(items) = node.value() {
+                } else if let YamlValue::Array(items) = node.value() {
                     for item in items {
                         walk(item, prop, results);
                     }
@@ -361,13 +361,13 @@ impl<'a> Evaluator<'a> {
             } else {
                 // No property name - match all nodes
                 match node.value() {
-                    JsonValue::Object(props) => {
+                    YamlValue::Object(props) => {
                         for (_, child) in props {
                             results.push(child);
                             walk(child, prop, results);
                         }
                     }
-                    JsonValue::Array(items) => {
+                    YamlValue::Array(items) => {
                         for item in items {
                             results.push(item);
                             walk(item, prop, results);
@@ -387,23 +387,23 @@ impl<'a> Evaluator<'a> {
 mod tests {
     use super::*;
 
-    fn make_test_tree() -> JsonNode {
+    fn make_test_tree() -> YamlNode {
         let items = vec![
-            JsonNode::new(JsonValue::String("a".to_string())),
-            JsonNode::new(JsonValue::String("b".to_string())),
-            JsonNode::new(JsonValue::String("c".to_string())),
+            YamlNode::new(YamlValue::String("a".to_string())),
+            YamlNode::new(YamlValue::String("b".to_string())),
+            YamlNode::new(YamlValue::String("c".to_string())),
         ];
 
         let obj = vec![
             (
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("test".to_string())),
+                YamlNode::new(YamlValue::String("test".to_string())),
             ),
-            ("age".to_string(), JsonNode::new(JsonValue::Number(42.0))),
-            ("items".to_string(), JsonNode::new(JsonValue::Array(items))),
+            ("age".to_string(), YamlNode::new(YamlValue::Number(42.0))),
+            ("items".to_string(), YamlNode::new(YamlValue::Array(items))),
         ];
 
-        JsonNode::new(JsonValue::Object(obj))
+        YamlNode::new(YamlValue::Object(obj))
     }
 
     #[test]
@@ -412,7 +412,7 @@ mod tests {
         let evaluator = Evaluator::new(&tree);
         let results = evaluator.evaluate(&[PathSegment::Root]);
         assert_eq!(results.len(), 1);
-        assert!(matches!(results[0].value(), JsonValue::Object(_)));
+        assert!(matches!(results[0].value(), YamlValue::Object(_)));
     }
 
     #[test]
@@ -422,7 +422,7 @@ mod tests {
         let results =
             evaluator.evaluate(&[PathSegment::Root, PathSegment::Child("name".to_string())]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &JsonValue::String("test".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String("test".to_string()));
     }
 
     #[test]
@@ -435,7 +435,7 @@ mod tests {
             PathSegment::Index(1),
         ]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &JsonValue::String("b".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String("b".to_string()));
     }
 
     #[test]
@@ -463,7 +463,7 @@ mod tests {
             PathSegment::RecursiveDescent(Some("name".to_string())),
         ]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &JsonValue::String("test".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String("test".to_string()));
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
             PathSegment::Index(0),
         ]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &JsonValue::String("a".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String("a".to_string()));
     }
 
     #[test]
@@ -489,7 +489,7 @@ mod tests {
             PathSegment::Index(-1),
         ]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &JsonValue::String("c".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String("c".to_string()));
     }
 
     #[test]
@@ -502,8 +502,8 @@ mod tests {
             PathSegment::Slice(Some(0), Some(2)),
         ]);
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].value(), &JsonValue::String("a".to_string()));
-        assert_eq!(results[1].value(), &JsonValue::String("b".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String("a".to_string()));
+        assert_eq!(results[1].value(), &YamlValue::String("b".to_string()));
     }
 
     #[test]
@@ -527,8 +527,8 @@ mod tests {
         ]);
         assert_eq!(results.len(), 2); // Should find both name and age
                                       // Verify we got the right values
-        assert_eq!(results[0].value(), &JsonValue::String("test".to_string()));
-        assert_eq!(results[1].value(), &JsonValue::Number(42.0));
+        assert_eq!(results[0].value(), &YamlValue::String("test".to_string()));
+        assert_eq!(results[1].value(), &YamlValue::Number(42.0));
     }
 
     #[test]
@@ -538,6 +538,6 @@ mod tests {
         // Current returns the same node
         let results = evaluator.evaluate_segment(&tree, &PathSegment::Current);
         assert_eq!(results.len(), 1);
-        assert!(matches!(results[0].value(), JsonValue::Object(_)));
+        assert!(matches!(results[0].value(), YamlValue::Object(_)));
     }
 }

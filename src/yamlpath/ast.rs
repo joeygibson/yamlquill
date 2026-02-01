@@ -1,6 +1,6 @@
-//! Abstract syntax tree types for JSONPath expressions.
+//! Abstract syntax tree types for YAMLPath expressions.
 
-/// A segment in a JSONPath expression.
+/// A segment in a YAMLPath expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PathSegment {
     /// Root node ($)
@@ -21,15 +21,15 @@ pub enum PathSegment {
     MultiProperty(Vec<String>),
 }
 
-/// A complete JSONPath expression.
+/// A complete YAMLPath expression.
 #[derive(Debug, Clone, PartialEq)]
-pub struct JsonPath {
+pub struct YamlPath {
     /// Segments that make up the path.
     pub segments: Vec<PathSegment>,
 }
 
-impl JsonPath {
-    /// Creates a new JSONPath with the given segments.
+impl YamlPath {
+    /// Creates a new YAMLPath with the given segments.
     pub fn new(segments: Vec<PathSegment>) -> Self {
         Self { segments }
     }

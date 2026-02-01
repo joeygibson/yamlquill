@@ -1,6 +1,6 @@
 pub mod edit_prompt;
 pub mod help_overlay;
-/// UI module for jsonquill terminal interface.
+/// UI module for yamlquill terminal interface.
 ///
 /// This module provides the main UI structure for rendering the terminal interface,
 /// including layout management and widget composition.
@@ -28,11 +28,11 @@ use crate::theme::Theme;
 /// # Example
 ///
 /// ```no_run
-/// use jsonquill::ui::UI;
-/// use jsonquill::theme::get_builtin_theme;
-/// use jsonquill::editor::state::EditorState;
-/// use jsonquill::document::tree::JsonTree;
-/// use jsonquill::document::node::{JsonNode, JsonValue};
+/// use yamlquill::ui::UI;
+/// use yamlquill::theme::get_builtin_theme;
+/// use yamlquill::editor::state::EditorState;
+/// use yamlquill::document::tree::YamlTree;
+/// use yamlquill::document::node::{YamlNode, YamlValue};
 /// use ratatui::backend::TermionBackend;
 /// use ratatui::Terminal;
 /// use std::io;
@@ -40,7 +40,7 @@ use crate::theme::Theme;
 ///
 /// let theme = get_builtin_theme("default-dark").unwrap();
 /// let ui = UI::new(theme);
-/// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+/// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
 /// let state = EditorState::new_with_default_theme(tree);
 /// let backend = TermionBackend::new(io::stdout().into_raw_mode().unwrap());
 /// let mut terminal = Terminal::new(backend).unwrap();
@@ -60,8 +60,8 @@ impl UI {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::ui::UI;
-    /// use jsonquill::theme::get_builtin_theme;
+    /// use yamlquill::ui::UI;
+    /// use yamlquill::theme::get_builtin_theme;
     ///
     /// let theme = get_builtin_theme("default-dark").unwrap();
     /// let ui = UI::new(theme);
@@ -107,11 +107,11 @@ impl UI {
     /// # Example
     ///
     /// ```no_run
-    /// use jsonquill::ui::UI;
-    /// use jsonquill::theme::get_builtin_theme;
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::tree::JsonTree;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::ui::UI;
+    /// use yamlquill::theme::get_builtin_theme;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::tree::YamlTree;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     /// use ratatui::backend::TermionBackend;
     /// use ratatui::Terminal;
     /// use std::io;
@@ -119,7 +119,7 @@ impl UI {
     ///
     /// let theme = get_builtin_theme("default-dark").unwrap();
     /// let ui = UI::new(theme);
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
     /// let backend = TermionBackend::new(io::stdout().into_raw_mode().unwrap());
     /// let mut terminal = Terminal::new(backend).unwrap();
@@ -236,8 +236,8 @@ mod tests {
 
     #[test]
     fn test_render_executes() {
-        use crate::document::node::{JsonNode, JsonValue};
-        use crate::document::tree::JsonTree;
+        use crate::document::node::{YamlNode, YamlValue};
+        use crate::document::tree::YamlTree;
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
@@ -247,7 +247,7 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
         let result = ui.render(&mut terminal, &mut state);
 
@@ -256,8 +256,8 @@ mod tests {
 
     #[test]
     fn test_render_with_status_line() {
-        use crate::document::node::{JsonNode, JsonValue};
-        use crate::document::tree::JsonTree;
+        use crate::document::node::{YamlNode, YamlValue};
+        use crate::document::tree::YamlTree;
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
@@ -267,7 +267,7 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());
         state.mark_dirty();

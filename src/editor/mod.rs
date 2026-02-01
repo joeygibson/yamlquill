@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```
-//! use jsonquill::editor::mode::EditorMode;
+//! use yamlquill::editor::mode::EditorMode;
 //!
 //! // Editor starts in Normal mode
 //! let mode = EditorMode::default();

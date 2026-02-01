@@ -1,106 +1,106 @@
-//! JSON node representation with metadata tracking.
+//! YAML node representation with metadata tracking.
 //!
-//! This module provides the core data structures for representing JSON documents
-//! in jsonquill. Each JSON value is wrapped in a `JsonNode` that tracks metadata
+//! This module provides the core data structures for representing YAML documents
+//! in yamlquill. Each YAML value is wrapped in a `YamlNode` that tracks metadata
 //! such as modification status and original formatting, enabling format-preserving
 //! edits and efficient change tracking.
 //!
 //! # Example
 //!
 //! ```
-//! use jsonquill::document::node::{JsonNode, JsonValue};
+//! use yamlquill::document::node::{YamlNode, YamlValue};
 //!
 //! // Create a simple string node
-//! let mut node = JsonNode::new(JsonValue::String("hello".to_string()));
+//! let mut node = YamlNode::new(YamlValue::String("hello".to_string()));
 //! assert!(node.is_modified()); // New nodes are marked as modified
 //!
 //! // Create a complex nested structure
-//! let object = JsonNode::new(JsonValue::Object(vec![
-//!     ("name".to_string(), JsonNode::new(JsonValue::String("jsonquill".to_string()))),
-//!     ("version".to_string(), JsonNode::new(JsonValue::Number(1.0))),
+//! let object = YamlNode::new(YamlValue::Object(vec![
+//!     ("name".to_string(), YamlNode::new(YamlValue::String("yamlquill".to_string()))),
+//!     ("version".to_string(), YamlNode::new(YamlValue::Number(1.0))),
 //! ]));
 //!
 //! // Modify a value
-//! if let JsonValue::Object(ref mut fields) = node.value_mut() {
-//!     fields.push(("key".to_string(), JsonNode::new(JsonValue::Null)));
+//! if let YamlValue::Object(ref mut fields) = node.value_mut() {
+//!     fields.push(("key".to_string(), YamlNode::new(YamlValue::Null)));
 //! }
 //! ```
 
-/// A byte range in the original JSON source.
+/// A byte range in the original YAML source.
 ///
-/// TextSpan tracks the position of a node's text in the original JSON string,
+/// TextSpan tracks the position of a node's text in the original YAML string,
 /// enabling exact format preservation for unmodified nodes.
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub struct TextSpan {
-    /// Start byte offset in original JSON
+    /// Start byte offset in original YAML
     pub start: usize,
-    /// End byte offset in original JSON (exclusive)
+    /// End byte offset in original YAML (exclusive)
     pub end: usize,
 }
 
-/// A JSON value without metadata.
+/// A YAML value without metadata.
 ///
-/// This enum represents the core JSON types: objects, arrays, strings, numbers,
-/// booleans, and null. Objects and arrays contain `JsonNode` instances to preserve
+/// This enum represents the core YAML types: objects, arrays, strings, numbers,
+/// booleans, and null. Objects and arrays contain `YamlNode` instances to preserve
 /// metadata throughout the tree structure.
 #[derive(Debug, Clone, PartialEq)]
-pub enum JsonValue {
-    /// A JSON object containing key-value pairs
-    Object(Vec<(String, JsonNode)>),
-    /// A JSON array containing ordered values
-    Array(Vec<JsonNode>),
-    /// A JSON string
+pub enum YamlValue {
+    /// A YAML object containing key-value pairs
+    Object(Vec<(String, YamlNode)>),
+    /// A YAML array containing ordered values
+    Array(Vec<YamlNode>),
+    /// A YAML string
     String(String),
-    /// A JSON number (represented as f64)
+    /// A YAML number (represented as f64)
     Number(f64),
-    /// A JSON boolean
+    /// A YAML boolean
     Boolean(bool),
-    /// A JSON null value
+    /// A YAML null value
     Null,
-    /// A JSONL document root containing lines (each line is a JsonNode)
-    JsonlRoot(Vec<JsonNode>),
+    /// A multi-document YAML file (each document is a YamlNode)
+    MultiDoc(Vec<YamlNode>),
 }
 
-/// A JSON value wrapped with metadata for tracking changes and formatting.
+/// A YAML value wrapped with metadata for tracking changes and formatting.
 ///
-/// `JsonNode` is the primary type used throughout jsonquill to represent JSON data.
-/// It wraps a `JsonValue` with `NodeMetadata` to track whether the node has been
+/// `YamlNode` is the primary type used throughout yamlquill to represent YAML data.
+/// It wraps a `YamlValue` with `NodeMetadata` to track whether the node has been
 /// modified and preserve original formatting information for format-preserving edits.
 #[derive(Debug, Clone, PartialEq)]
-pub struct JsonNode {
-    pub(crate) value: JsonValue,
+pub struct YamlNode {
+    pub(crate) value: YamlValue,
     pub(crate) metadata: NodeMetadata,
 }
 
-/// Metadata associated with a JSON node.
+/// Metadata associated with a YAML node.
 ///
 /// This structure tracks information about a node beyond its value, including
 /// whether it has been modified since loading and its byte position in the
 /// original source for format preservation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeMetadata {
-    /// Byte range in the original JSON string (for unmodified nodes)
+    /// Byte range in the original YAML string (for unmodified nodes)
     pub text_span: Option<TextSpan>,
     /// Whether this node has been modified
     pub modified: bool,
 }
 
-impl JsonValue {
+impl YamlValue {
     /// Returns true if this value is an object.
     ///
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::JsonValue;
+    /// use yamlquill::document::node::YamlValue;
     ///
-    /// let obj = JsonValue::Object(vec![]);
+    /// let obj = YamlValue::Object(vec![]);
     /// assert!(obj.is_object());
     ///
-    /// let num = JsonValue::Number(42.0);
+    /// let num = YamlValue::Number(42.0);
     /// assert!(!num.is_object());
     /// ```
     pub fn is_object(&self) -> bool {
-        matches!(self, JsonValue::Object(_))
+        matches!(self, YamlValue::Object(_))
     }
 
     /// Returns true if this value is an array.
@@ -108,44 +108,44 @@ impl JsonValue {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::JsonValue;
+    /// use yamlquill::document::node::YamlValue;
     ///
-    /// let arr = JsonValue::Array(vec![]);
+    /// let arr = YamlValue::Array(vec![]);
     /// assert!(arr.is_array());
     ///
-    /// let num = JsonValue::Number(42.0);
+    /// let num = YamlValue::Number(42.0);
     /// assert!(!num.is_array());
     /// ```
     pub fn is_array(&self) -> bool {
-        matches!(self, JsonValue::Array(_))
+        matches!(self, YamlValue::Array(_))
     }
 
-    /// Returns true if this value is a container (object, array, or JSONL root).
+    /// Returns true if this value is a container (object, array, or multi-doc root).
     ///
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::JsonValue;
+    /// use yamlquill::document::node::YamlValue;
     ///
-    /// let obj = JsonValue::Object(vec![]);
+    /// let obj = YamlValue::Object(vec![]);
     /// assert!(obj.is_container());
     ///
-    /// let arr = JsonValue::Array(vec![]);
+    /// let arr = YamlValue::Array(vec![]);
     /// assert!(arr.is_container());
     ///
-    /// let num = JsonValue::Number(42.0);
+    /// let num = YamlValue::Number(42.0);
     /// assert!(!num.is_container());
     /// ```
     pub fn is_container(&self) -> bool {
         matches!(
             self,
-            JsonValue::Object(_) | JsonValue::Array(_) | JsonValue::JsonlRoot(_)
+            YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_)
         )
     }
 }
 
-impl JsonNode {
-    /// Creates a new `JsonNode` with the given value.
+impl YamlNode {
+    /// Creates a new `YamlNode` with the given value.
     ///
     /// The node is marked as modified by default since it's newly created.
     /// The text_span field is set to None.
@@ -153,12 +153,12 @@ impl JsonNode {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let node = JsonNode::new(JsonValue::Number(42.0));
+    /// let node = YamlNode::new(YamlValue::Number(42.0));
     /// assert!(node.is_modified());
     /// ```
-    pub fn new(value: JsonValue) -> Self {
+    pub fn new(value: YamlValue) -> Self {
         Self {
             value,
             metadata: NodeMetadata {
@@ -173,12 +173,12 @@ impl JsonNode {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let node = JsonNode::new(JsonValue::Boolean(true));
-    /// assert!(matches!(node.value(), JsonValue::Boolean(true)));
+    /// let node = YamlNode::new(YamlValue::Boolean(true));
+    /// assert!(matches!(node.value(), YamlValue::Boolean(true)));
     /// ```
-    pub fn value(&self) -> &JsonValue {
+    pub fn value(&self) -> &YamlValue {
         &self.value
     }
 
@@ -190,13 +190,13 @@ impl JsonNode {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let mut node = JsonNode::new(JsonValue::String("old".to_string()));
-    /// *node.value_mut() = JsonValue::String("new".to_string());
+    /// let mut node = YamlNode::new(YamlValue::String("old".to_string()));
+    /// *node.value_mut() = YamlValue::String("new".to_string());
     /// assert!(node.is_modified());
     /// ```
-    pub fn value_mut(&mut self) -> &mut JsonValue {
+    pub fn value_mut(&mut self) -> &mut YamlValue {
         self.metadata.modified = true;
         &mut self.value
     }
@@ -209,9 +209,9 @@ impl JsonNode {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let node = JsonNode::new(JsonValue::Null);
+    /// let node = YamlNode::new(YamlValue::Null);
     /// assert!(node.is_modified());
     /// ```
     pub fn is_modified(&self) -> bool {

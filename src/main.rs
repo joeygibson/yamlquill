@@ -7,21 +7,21 @@ use termion::input::MouseTerminal;
 use termion::raw::IntoRawMode;
 use termion::screen::IntoAlternateScreen;
 
-use jsonquill::document::node::{JsonNode, JsonValue};
-use jsonquill::document::tree::JsonTree;
-use jsonquill::editor::state::EditorState;
-use jsonquill::file::loader::{load_json_file, load_json_from_stdin};
-use jsonquill::input::InputHandler;
-use jsonquill::theme::get_builtin_theme;
-use jsonquill::ui::UI;
+use yamlquill::document::node::{YamlNode, YamlValue};
+use yamlquill::document::tree::YamlTree;
+use yamlquill::editor::state::EditorState;
+use yamlquill::file::loader::{load_yaml_file, load_yaml_from_stdin};
+use yamlquill::input::InputHandler;
+use yamlquill::theme::get_builtin_theme;
+use yamlquill::ui::UI;
 
-/// JSONQuill - A terminal-based JSON editor with vim-style keybindings
+/// YAMLQuill - A terminal-based structural YAML editor
 #[derive(Parser)]
-#[command(name = "jsonquill")]
+#[command(name = "yamlquill")]
 #[command(version)]
-#[command(about = "JSONQuill - A terminal-based JSON editor with vim-style keybindings", long_about = None)]
+#[command(about = "A terminal-based structural YAML editor", long_about = None)]
 struct Cli {
-    /// JSON file to edit (omit to read from stdin if piped, or create empty document if interactive)
+    /// YAML file to edit (omit to read from stdin if piped, or create empty document if interactive)
     file: Option<String>,
 
     /// Theme name (default: default-dark)
@@ -64,43 +64,43 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Load file or create empty document BEFORE terminal setup
-    // (stdin might be used for JSON data, so we need to read it before taking over the terminal)
+    // (stdin might be used for YAML data, so we need to read it before taking over the terminal)
     let (tree, filename, _stdin_was_piped) = if let Some(file_path) = cli.file {
         // Load from file
-        let tree = load_json_file(&file_path)?;
+        let tree = load_yaml_file(&file_path)?;
         (tree, Some(file_path), false)
     } else {
         // No filename provided - check if stdin has piped data
         if !io::stdin().is_terminal() {
-            // Stdin is piped - read JSON from it
-            let tree = load_json_from_stdin()?;
+            // Stdin is piped - read YAML from it
+            let tree = load_yaml_from_stdin()?;
             (tree, None, true)
         } else {
             // Interactive mode - create sample document with nested structure
             let user_obj = vec![
                 (
                     "name".to_string(),
-                    JsonNode::new(JsonValue::String("Alice".to_string())),
+                    YamlNode::new(YamlValue::String("Alice".to_string())),
                 ),
                 (
                     "email".to_string(),
-                    JsonNode::new(JsonValue::String("alice@example.com".to_string())),
+                    YamlNode::new(YamlValue::String("alice@example.com".to_string())),
                 ),
             ];
 
             let obj = vec![
                 (
                     "user".to_string(),
-                    JsonNode::new(JsonValue::Object(user_obj)),
+                    YamlNode::new(YamlValue::Object(user_obj)),
                 ),
-                ("count".to_string(), JsonNode::new(JsonValue::Number(42.0))),
+                ("count".to_string(), YamlNode::new(YamlValue::Number(42.0))),
                 (
                     "active".to_string(),
-                    JsonNode::new(JsonValue::Boolean(true)),
+                    YamlNode::new(YamlValue::Boolean(true)),
                 ),
             ];
 
-            let tree = JsonTree::new(JsonNode::new(JsonValue::Object(obj)));
+            let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
             (tree, None, false)
         }
     };
@@ -120,7 +120,7 @@ fn main() -> Result<()> {
     terminal.clear()?;
 
     // Load config
-    use jsonquill::config::Config;
+    use yamlquill::config::Config;
     let config = Config::load();
 
     // Initialize components

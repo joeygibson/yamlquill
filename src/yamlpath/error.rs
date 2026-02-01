@@ -1,10 +1,10 @@
-//! Error types for JSONPath parsing and evaluation.
+//! Error types for YAMLPath parsing and evaluation.
 
 use std::fmt;
 
-/// Errors that can occur during JSONPath parsing or evaluation.
+/// Errors that can occur during YAMLPath parsing or evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JsonPathError {
+pub enum YamlPathError {
     /// Unexpected token at a specific position.
     UnexpectedToken {
         position: usize,
@@ -17,10 +17,10 @@ pub enum JsonPathError {
     InvalidSyntax { message: String },
 }
 
-impl fmt::Display for JsonPathError {
+impl fmt::Display for YamlPathError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            JsonPathError::UnexpectedToken {
+            YamlPathError::UnexpectedToken {
                 position,
                 found,
                 expected,
@@ -29,14 +29,14 @@ impl fmt::Display for JsonPathError {
                 "Unexpected token '{}' at position {}, expected {}",
                 found, position, expected
             ),
-            JsonPathError::UnexpectedEnd { expected } => {
+            YamlPathError::UnexpectedEnd { expected } => {
                 write!(f, "Unexpected end of input, expected {}", expected)
             }
-            JsonPathError::InvalidSyntax { message } => {
-                write!(f, "Invalid JSONPath syntax: {}", message)
+            YamlPathError::InvalidSyntax { message } => {
+                write!(f, "Invalid YAMLPath syntax: {}", message)
             }
         }
     }
 }
 
-impl std::error::Error for JsonPathError {}
+impl std::error::Error for YamlPathError {}

@@ -1,23 +1,23 @@
 //! JSON file saving functionality.
 //!
-//! This module provides functions to save `JsonTree` structures to files with
+//! This module provides functions to save `YamlTree` structures to files with
 //! atomic write operations and optional backup creation.
 
 use crate::config::Config;
-use crate::document::node::{JsonNode, JsonValue};
-use crate::document::tree::JsonTree;
+use crate::document::node::{YamlNode, YamlValue};
+use crate::document::tree::YamlTree;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
 /// Saves a JSON tree to a file with optional backup creation.
 ///
-/// This function serializes a `JsonTree` to JSON format and writes it to the
+/// This function serializes a `YamlTree` to JSON format and writes it to the
 /// specified file path. The write operation is atomic (writes to a temp file
 /// then renames) to prevent data loss on crashes. Optionally creates a backup
 /// of the original file before writing.
 ///
-/// For JSONL documents (JsonValue::JsonlRoot), saves in line-by-line format.
+/// For multi-document YAML documents (YamlValue::MultiDoc), saves in line-by-line format.
 ///
 /// # Arguments
 ///
@@ -37,14 +37,14 @@ use std::path::Path;
 /// # Examples
 ///
 /// ```no_run
-/// use jsonquill::file::saver::save_json_file;
-/// use jsonquill::document::node::{JsonNode, JsonValue};
-/// use jsonquill::document::tree::JsonTree;
-/// use jsonquill::config::Config;
+/// use yamlquill::file::saver::save_yaml_file;
+/// use yamlquill::document::node::{YamlNode, YamlValue};
+/// use yamlquill::document::tree::YamlTree;
+/// use yamlquill::config::Config;
 ///
-/// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![])));
+/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
 /// let config = Config::default();
-/// save_json_file("output.json", &tree, &config).unwrap();
+/// save_yaml_file("output.json", &tree, &config).unwrap();
 /// ```
 ///
 /// # Errors
@@ -74,15 +74,15 @@ fn create_backup<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-pub fn save_json_file<P: AsRef<Path>>(path: P, tree: &JsonTree, config: &Config) -> Result<()> {
+pub fn save_yaml_file<P: AsRef<Path>>(path: P, tree: &YamlTree, config: &Config) -> Result<()> {
     let path = path.as_ref();
 
     // Determine if we should compress based on target filename
     let should_compress = path.to_string_lossy().ends_with(".gz");
 
-    // Check if this is a JSONL document
-    if matches!(tree.root().value(), JsonValue::JsonlRoot(_)) {
-        return save_jsonl(path, tree, config, should_compress);
+    // Check if this is a multi-document YAML document
+    if matches!(tree.root().value(), YamlValue::MultiDoc(_)) {
+        return save_yamll(path, tree, config, should_compress);
     }
 
     // Create backup if requested and file exists
@@ -91,7 +91,7 @@ pub fn save_json_file<P: AsRef<Path>>(path: P, tree: &JsonTree, config: &Config)
     }
 
     // Serialize with format preservation if original source is available
-    let mut json_str = if let Some(original) = tree.original_source() {
+    let mut yaml_str = if let Some(original) = tree.original_source() {
         serialize_preserving_format(tree.root(), original, config, 0)
     } else {
         // No original source, use standard serialization
@@ -100,18 +100,18 @@ pub fn save_json_file<P: AsRef<Path>>(path: P, tree: &JsonTree, config: &Config)
 
     // Preserve trailing newline from original if present
     if let Some(original) = tree.original_source() {
-        if original.ends_with('\n') && !json_str.ends_with('\n') {
-            json_str.push('\n');
+        if original.ends_with('\n') && !yaml_str.ends_with('\n') {
+            yaml_str.push('\n');
         }
     }
 
     // Validate the serialized JSON before writing to disk
     // This catches serialization bugs before they corrupt user data
-    serde_json::from_str::<serde_json::Value>(&json_str)
-        .context("Generated invalid JSON - this is a bug in jsonquill's serialization")?;
+    serde_yaml::from_str::<serde_yaml::Value>(&yaml_str)
+        .context("Generated invalid YAML - this is a bug in yamlquill's serialization")?;
 
     // Write atomically (compressed or uncompressed)
-    write_file_atomic(path, json_str.as_bytes(), should_compress)?;
+    write_file_atomic(path, yaml_str.as_bytes(), should_compress)?;
 
     Ok(())
 }
@@ -161,12 +161,12 @@ fn write_file_atomic<P: AsRef<Path>>(path: P, data: &[u8], compress: bool) -> Re
     Ok(())
 }
 
-/// Saves a JSONL document to a file.
+/// Saves a multi-document YAML document to a file.
 ///
 /// Each line is saved as a separate JSON object (one per line).
-fn save_jsonl<P: AsRef<Path>>(
+fn save_yamll<P: AsRef<Path>>(
     path: P,
-    tree: &JsonTree,
+    tree: &YamlTree,
     config: &Config,
     compress: bool,
 ) -> Result<()> {
@@ -179,15 +179,15 @@ fn save_jsonl<P: AsRef<Path>>(
 
     let mut output = String::new();
 
-    if let JsonValue::JsonlRoot(lines) = tree.root().value() {
+    if let YamlValue::MultiDoc(lines) = tree.root().value() {
         for (i, node) in lines.iter().enumerate() {
-            // JSONL requires compact single-line JSON
+            // multi-document YAML requires compact single-line JSON
             let line = serialize_node_compact(node);
 
-            // Validate each line is valid JSON
-            serde_json::from_str::<serde_json::Value>(&line).with_context(|| {
+            // Validate each line is valid YAML
+            serde_yaml::from_str::<serde_yaml::Value>(&line).with_context(|| {
                 format!(
-                    "Generated invalid JSON at line {} - this is a bug in jsonquill's serialization",
+                    "Generated invalid YAML at line {} - this is a bug in yamlquill's serialization",
                     i + 1
                 )
             })?;
@@ -208,7 +208,7 @@ fn save_jsonl<P: AsRef<Path>>(
 /// If the node is unmodified and has a text span, extracts the original text.
 /// Otherwise, serializes using the configured formatting.
 fn serialize_preserving_format(
-    node: &JsonNode,
+    node: &YamlNode,
     original: &str,
     config: &Config,
     depth: usize,
@@ -227,8 +227,8 @@ fn serialize_preserving_format(
 
     // Node was modified or has no span - serialize fresh
     match node.value() {
-        JsonValue::Object(entries) => serialize_object_preserving(entries, original, config, depth),
-        JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+        YamlValue::Object(entries) => serialize_object_preserving(entries, original, config, depth),
+        YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
             serialize_array_preserving(elements, original, config, depth)
         }
         _ => serialize_node(node, config.indent_size, depth),
@@ -237,7 +237,7 @@ fn serialize_preserving_format(
 
 /// Serializes an object with format preservation for children.
 fn serialize_object_preserving(
-    entries: &[(String, JsonNode)],
+    entries: &[(String, YamlNode)],
     original: &str,
     config: &Config,
     depth: usize,
@@ -252,7 +252,7 @@ fn serialize_object_preserving(
     let mut result = "{\n".to_string();
     for (i, (key, value)) in entries.iter().enumerate() {
         result.push_str(&next_indent);
-        result.push_str(&format!("\"{}\": ", escape_json_string(key)));
+        result.push_str(&format!("\"{}\": ", escape_yaml_string(key)));
         result.push_str(&serialize_preserving_format(
             value,
             original,
@@ -271,7 +271,7 @@ fn serialize_object_preserving(
 
 /// Serializes an array with format preservation for children.
 fn serialize_array_preserving(
-    elements: &[JsonNode],
+    elements: &[YamlNode],
     original: &str,
     config: &Config,
     depth: usize,
@@ -304,11 +304,11 @@ fn serialize_array_preserving(
 
 /// Serializes a JSON node to a compact single-line string.
 ///
-/// This is used for JSONL format where each line must be a single-line JSON object.
+/// This is used for multi-document YAML format where each line must be a single-line JSON object.
 /// Numbers are formatted as integers when they have no fractional part.
-pub fn serialize_node_compact(node: &JsonNode) -> String {
+pub fn serialize_node_compact(node: &YamlNode) -> String {
     match node.value() {
-        JsonValue::Object(entries) => {
+        YamlValue::Object(entries) => {
             if entries.is_empty() {
                 return "{}".to_string();
             }
@@ -317,22 +317,22 @@ pub fn serialize_node_compact(node: &JsonNode) -> String {
                 .map(|(key, value)| {
                     format!(
                         "\"{}\":{}",
-                        escape_json_string(key),
+                        escape_yaml_string(key),
                         serialize_node_compact(value)
                     )
                 })
                 .collect();
             format!("{{{}}}", parts.join(","))
         }
-        JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+        YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
             if elements.is_empty() {
                 return "[]".to_string();
             }
             let parts: Vec<String> = elements.iter().map(serialize_node_compact).collect();
             format!("[{}]", parts.join(","))
         }
-        JsonValue::String(s) => format!("\"{}\"", escape_json_string(s)),
-        JsonValue::Number(n) => {
+        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s)),
+        YamlValue::Number(n) => {
             // Format numbers cleanly - remove unnecessary decimal points
             if n.fract() == 0.0 && n.is_finite() {
                 format!("{:.0}", n)
@@ -340,8 +340,8 @@ pub fn serialize_node_compact(node: &JsonNode) -> String {
                 n.to_string()
             }
         }
-        JsonValue::Boolean(b) => b.to_string(),
-        JsonValue::Null => "null".to_string(),
+        YamlValue::Boolean(b) => b.to_string(),
+        YamlValue::Null => "null".to_string(),
     }
 }
 
@@ -361,7 +361,7 @@ pub fn serialize_node_compact(node: &JsonNode) -> String {
 ///
 /// A jq-style formatted JSON string
 pub fn serialize_node_jq_style(
-    node: &JsonNode,
+    node: &YamlNode,
     indent_size: usize,
     current_depth: usize,
 ) -> String {
@@ -369,7 +369,7 @@ pub fn serialize_node_jq_style(
     let next_indent = " ".repeat(indent_size * (current_depth + 1));
 
     match node.value() {
-        JsonValue::Object(entries) => {
+        YamlValue::Object(entries) => {
             if entries.is_empty() {
                 return "{}".to_string();
             }
@@ -378,7 +378,7 @@ pub fn serialize_node_jq_style(
             let mut result = "{\n".to_string();
             for (i, (key, value)) in entries.iter().enumerate() {
                 result.push_str(&next_indent);
-                result.push_str(&format!("\"{}\": ", escape_json_string(key)));
+                result.push_str(&format!("\"{}\": ", escape_yaml_string(key)));
                 result.push_str(&serialize_node_jq_style(
                     value,
                     indent_size,
@@ -393,7 +393,7 @@ pub fn serialize_node_jq_style(
             result.push('}');
             result
         }
-        JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+        YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
             if elements.is_empty() {
                 return "[]".to_string();
             }
@@ -416,22 +416,22 @@ pub fn serialize_node_jq_style(
             result.push(']');
             result
         }
-        JsonValue::String(s) => format!("\"{}\"", escape_json_string(s)),
-        JsonValue::Number(n) => {
+        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s)),
+        YamlValue::Number(n) => {
             if n.fract() == 0.0 && n.is_finite() {
                 format!("{:.0}", n)
             } else {
                 n.to_string()
             }
         }
-        JsonValue::Boolean(b) => b.to_string(),
-        JsonValue::Null => "null".to_string(),
+        YamlValue::Boolean(b) => b.to_string(),
+        YamlValue::Null => "null".to_string(),
     }
 }
 
 /// Recursively serializes a JSON node to a formatted string.
 ///
-/// This function converts a `JsonNode` and all its children into a JSON string
+/// This function converts a `YamlNode` and all its children into a JSON string
 /// with proper indentation and formatting. It handles all JSON value types
 /// including nested objects and arrays.
 ///
@@ -447,12 +447,12 @@ pub fn serialize_node_jq_style(
 /// # Returns
 ///
 /// A formatted JSON string representing the node
-pub fn serialize_node(node: &JsonNode, indent_size: usize, current_depth: usize) -> String {
+pub fn serialize_node(node: &YamlNode, indent_size: usize, current_depth: usize) -> String {
     let indent = " ".repeat(indent_size * current_depth);
     let next_indent = " ".repeat(indent_size * (current_depth + 1));
 
     match node.value() {
-        JsonValue::Object(entries) => {
+        YamlValue::Object(entries) => {
             if entries.is_empty() {
                 return "{}".to_string();
             }
@@ -469,7 +469,7 @@ pub fn serialize_node(node: &JsonNode, indent_size: usize, current_depth: usize)
             let mut result = "{\n".to_string();
             for (i, (key, value)) in entries.iter().enumerate() {
                 result.push_str(&next_indent);
-                result.push_str(&format!("\"{}\": ", escape_json_string(key)));
+                result.push_str(&format!("\"{}\": ", escape_yaml_string(key)));
                 result.push_str(&serialize_node(value, indent_size, current_depth + 1));
                 if i < entries.len() - 1 {
                     result.push(',');
@@ -480,7 +480,7 @@ pub fn serialize_node(node: &JsonNode, indent_size: usize, current_depth: usize)
             result.push('}');
             result
         }
-        JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+        YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
             if elements.is_empty() {
                 return "[]".to_string();
             }
@@ -507,8 +507,8 @@ pub fn serialize_node(node: &JsonNode, indent_size: usize, current_depth: usize)
             result.push(']');
             result
         }
-        JsonValue::String(s) => format!("\"{}\"", escape_json_string(s)),
-        JsonValue::Number(n) => {
+        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s)),
+        YamlValue::Number(n) => {
             // Format numbers cleanly - remove unnecessary decimal points
             if n.fract() == 0.0 && n.is_finite() {
                 format!("{:.0}", n)
@@ -516,35 +516,35 @@ pub fn serialize_node(node: &JsonNode, indent_size: usize, current_depth: usize)
                 n.to_string()
             }
         }
-        JsonValue::Boolean(b) => b.to_string(),
-        JsonValue::Null => "null".to_string(),
+        YamlValue::Boolean(b) => b.to_string(),
+        YamlValue::Null => "null".to_string(),
     }
 }
 
 /// Checks if an object should use compact (single-line) formatting.
 ///
 /// Returns true if all values in the object are scalar (not containers).
-fn should_use_compact_format_object(entries: &[(String, JsonNode)]) -> bool {
+fn should_use_compact_format_object(entries: &[(String, YamlNode)]) -> bool {
     entries.iter().all(|(_, node)| !node.value().is_container())
 }
 
 /// Checks if an array should use compact (single-line) formatting.
 ///
 /// Returns true if all elements in the array are scalar (not containers).
-fn should_use_compact_format_array(elements: &[JsonNode]) -> bool {
+fn should_use_compact_format_array(elements: &[YamlNode]) -> bool {
     elements.iter().all(|node| !node.value().is_container())
 }
 
 /// Serializes an object in compact (single-line) format.
 ///
 /// Example: `{"a": 1, "b": "hello", "c": true}`
-fn serialize_object_compact(entries: &[(String, JsonNode)]) -> String {
+fn serialize_object_compact(entries: &[(String, YamlNode)]) -> String {
     let parts: Vec<String> = entries
         .iter()
         .map(|(key, value)| {
             format!(
                 "\"{}\": {}",
-                escape_json_string(key),
+                escape_yaml_string(key),
                 serialize_scalar(value.value())
             )
         })
@@ -555,7 +555,7 @@ fn serialize_object_compact(entries: &[(String, JsonNode)]) -> String {
 /// Serializes an array in compact (single-line) format.
 ///
 /// Example: `[1, 2, 3, 4, 5]`
-fn serialize_array_compact(elements: &[JsonNode]) -> String {
+fn serialize_array_compact(elements: &[YamlNode]) -> String {
     let parts: Vec<String> = elements
         .iter()
         .map(|node| serialize_scalar(node.value()))
@@ -566,18 +566,18 @@ fn serialize_array_compact(elements: &[JsonNode]) -> String {
 /// Serializes a scalar value (not a container) to a string.
 ///
 /// This is a simplified version of serialize_node for scalar values only.
-fn serialize_scalar(value: &JsonValue) -> String {
+fn serialize_scalar(value: &YamlValue) -> String {
     match value {
-        JsonValue::String(s) => format!("\"{}\"", escape_json_string(s)),
-        JsonValue::Number(n) => {
+        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s)),
+        YamlValue::Number(n) => {
             if n.fract() == 0.0 && n.is_finite() {
                 format!("{:.0}", n)
             } else {
                 n.to_string()
             }
         }
-        JsonValue::Boolean(b) => b.to_string(),
-        JsonValue::Null => "null".to_string(),
+        YamlValue::Boolean(b) => b.to_string(),
+        YamlValue::Null => "null".to_string(),
         _ => panic!("serialize_scalar called on non-scalar value"),
     }
 }
@@ -596,7 +596,7 @@ fn serialize_scalar(value: &JsonValue) -> String {
 /// # Returns
 ///
 /// A new string with all special characters properly escaped
-fn escape_json_string(s: &str) -> String {
+fn escape_yaml_string(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
 
     for c in s.chars() {
@@ -624,50 +624,50 @@ mod tests {
 
     #[test]
     fn test_serialize_null() {
-        let node = JsonNode::new(JsonValue::Null);
+        let node = YamlNode::new(YamlValue::Null);
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "null");
     }
 
     #[test]
     fn test_serialize_boolean() {
-        let node = JsonNode::new(JsonValue::Boolean(true));
+        let node = YamlNode::new(YamlValue::Boolean(true));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "true");
 
-        let node = JsonNode::new(JsonValue::Boolean(false));
+        let node = YamlNode::new(YamlValue::Boolean(false));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "false");
     }
 
     #[test]
     fn test_serialize_number() {
-        let node = JsonNode::new(JsonValue::Number(42.0));
+        let node = YamlNode::new(YamlValue::Number(42.0));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "42");
 
-        let node = JsonNode::new(JsonValue::Number(2.5));
+        let node = YamlNode::new(YamlValue::Number(2.5));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "2.5");
     }
 
     #[test]
     fn test_serialize_string() {
-        let node = JsonNode::new(JsonValue::String("hello".to_string()));
+        let node = YamlNode::new(YamlValue::String("hello".to_string()));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "\"hello\"");
     }
 
     #[test]
     fn test_serialize_empty_object() {
-        let node = JsonNode::new(JsonValue::Object(vec![]));
+        let node = YamlNode::new(YamlValue::Object(vec![]));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "{}");
     }
 
     #[test]
     fn test_serialize_empty_array() {
-        let node = JsonNode::new(JsonValue::Array(vec![]));
+        let node = YamlNode::new(YamlValue::Array(vec![]));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "[]");
     }
@@ -676,9 +676,9 @@ mod tests {
     fn test_serialize_simple_object() {
         let obj = vec![(
             "name".to_string(),
-            JsonNode::new(JsonValue::String("Alice".to_string())),
+            YamlNode::new(YamlValue::String("Alice".to_string())),
         )];
-        let node = JsonNode::new(JsonValue::Object(obj));
+        let node = YamlNode::new(YamlValue::Object(obj));
         let result = serialize_node(&node, 2, 0);
         // Small scalar objects use compact formatting
         assert_eq!(result, "{\"name\": \"Alice\"}");
@@ -687,11 +687,11 @@ mod tests {
     #[test]
     fn test_serialize_simple_array() {
         let arr = vec![
-            JsonNode::new(JsonValue::Number(1.0)),
-            JsonNode::new(JsonValue::Number(2.0)),
-            JsonNode::new(JsonValue::Number(3.0)),
+            YamlNode::new(YamlValue::Number(1.0)),
+            YamlNode::new(YamlValue::Number(2.0)),
+            YamlNode::new(YamlValue::Number(3.0)),
         ];
-        let node = JsonNode::new(JsonValue::Array(arr));
+        let node = YamlNode::new(YamlValue::Array(arr));
         let result = serialize_node(&node, 2, 0);
         // Small scalar arrays use compact formatting
         assert_eq!(result, "[1, 2, 3]");
@@ -699,33 +699,33 @@ mod tests {
 
     #[test]
     fn test_serialize_nested_object() {
-        let inner = vec![("age".to_string(), JsonNode::new(JsonValue::Number(30.0)))];
-        let outer = vec![("user".to_string(), JsonNode::new(JsonValue::Object(inner)))];
-        let node = JsonNode::new(JsonValue::Object(outer));
+        let inner = vec![("age".to_string(), YamlNode::new(YamlValue::Number(30.0)))];
+        let outer = vec![("user".to_string(), YamlNode::new(YamlValue::Object(inner)))];
+        let node = YamlNode::new(YamlValue::Object(outer));
         let result = serialize_node(&node, 2, 0);
         // Inner object with single scalar value uses compact formatting
         assert_eq!(result, "{\n  \"user\": {\"age\": 30}\n}");
     }
 
     #[test]
-    fn test_escape_json_string() {
-        assert_eq!(escape_json_string("hello"), "hello");
-        assert_eq!(escape_json_string("hello\"world"), "hello\\\"world");
-        assert_eq!(escape_json_string("hello\\world"), "hello\\\\world");
-        assert_eq!(escape_json_string("hello\nworld"), "hello\\nworld");
-        assert_eq!(escape_json_string("hello\tworld"), "hello\\tworld");
-        assert_eq!(escape_json_string("hello\rworld"), "hello\\rworld");
+    fn test_escape_yaml_string() {
+        assert_eq!(escape_yaml_string("hello"), "hello");
+        assert_eq!(escape_yaml_string("hello\"world"), "hello\\\"world");
+        assert_eq!(escape_yaml_string("hello\\world"), "hello\\\\world");
+        assert_eq!(escape_yaml_string("hello\nworld"), "hello\\nworld");
+        assert_eq!(escape_yaml_string("hello\tworld"), "hello\\tworld");
+        assert_eq!(escape_yaml_string("hello\rworld"), "hello\\rworld");
     }
 
     #[test]
     fn test_compact_array_with_scalars() {
         let arr = vec![
-            JsonNode::new(JsonValue::Number(1.0)),
-            JsonNode::new(JsonValue::String("test".to_string())),
-            JsonNode::new(JsonValue::Boolean(true)),
-            JsonNode::new(JsonValue::Null),
+            YamlNode::new(YamlValue::Number(1.0)),
+            YamlNode::new(YamlValue::String("test".to_string())),
+            YamlNode::new(YamlValue::Boolean(true)),
+            YamlNode::new(YamlValue::Null),
         ];
-        let node = JsonNode::new(JsonValue::Array(arr));
+        let node = YamlNode::new(YamlValue::Array(arr));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "[1, \"test\", true, null]");
     }
@@ -733,14 +733,14 @@ mod tests {
     #[test]
     fn test_compact_object_with_scalars() {
         let obj = vec![
-            ("a".to_string(), JsonNode::new(JsonValue::Number(1.0))),
+            ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
             (
                 "b".to_string(),
-                JsonNode::new(JsonValue::String("test".to_string())),
+                YamlNode::new(YamlValue::String("test".to_string())),
             ),
-            ("c".to_string(), JsonNode::new(JsonValue::Boolean(false))),
+            ("c".to_string(), YamlNode::new(YamlValue::Boolean(false))),
         ];
-        let node = JsonNode::new(JsonValue::Object(obj));
+        let node = YamlNode::new(YamlValue::Object(obj));
         let result = serialize_node(&node, 2, 0);
         assert_eq!(result, "{\"a\": 1, \"b\": \"test\", \"c\": false}");
     }
@@ -750,10 +750,10 @@ mod tests {
         // Array containing an object should use multi-line formatting
         let inner = vec![(
             "key".to_string(),
-            JsonNode::new(JsonValue::String("value".to_string())),
+            YamlNode::new(YamlValue::String("value".to_string())),
         )];
-        let arr = vec![JsonNode::new(JsonValue::Object(inner))];
-        let node = JsonNode::new(JsonValue::Array(arr));
+        let arr = vec![YamlNode::new(YamlValue::Object(inner))];
+        let node = YamlNode::new(YamlValue::Array(arr));
         let result = serialize_node(&node, 2, 0);
         assert!(
             result.contains('\n'),
@@ -764,10 +764,10 @@ mod tests {
     #[test]
     fn test_long_compact_array_uses_multiline() {
         // Create an array that would exceed 80 characters in compact format
-        let arr: Vec<JsonNode> = (0..30)
-            .map(|i| JsonNode::new(JsonValue::Number(i as f64)))
+        let arr: Vec<YamlNode> = (0..30)
+            .map(|i| YamlNode::new(YamlValue::Number(i as f64)))
             .collect();
-        let node = JsonNode::new(JsonValue::Array(arr));
+        let node = YamlNode::new(YamlValue::Array(arr));
         let result = serialize_node(&node, 2, 0);
         // Should fall back to multi-line because compact would be > 80 chars
         assert!(
@@ -778,7 +778,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_preserves_formatting() {
-        use crate::document::parser::parse_json;
+        use crate::document::parser::parse_yaml;
         use std::fs;
         use tempfile::NamedTempFile;
 
@@ -789,7 +789,7 @@ mod tests {
 }"#;
 
         // Parse
-        let tree = parse_json(original_json).unwrap();
+        let tree = parse_yaml(original_json).unwrap();
         let config = Config {
             preserve_formatting: true,
             ..Default::default()
@@ -797,7 +797,7 @@ mod tests {
 
         // Save
         let temp_file = NamedTempFile::new().unwrap();
-        save_json_file(temp_file.path(), &tree, &config).unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
 
         // Read back
         let saved_json = fs::read_to_string(temp_file.path()).unwrap();
@@ -808,26 +808,26 @@ mod tests {
 
     #[test]
     fn test_modified_node_uses_config_formatting() {
-        use crate::document::node::JsonValue;
-        use crate::document::parser::parse_json;
+        use crate::document::node::YamlValue;
+        use crate::document::parser::parse_yaml;
         use std::fs;
         use tempfile::NamedTempFile;
 
         let original_json = r#"{"name":    "Alice"}"#; // Odd spacing
 
         // Parse
-        let mut tree = parse_json(original_json).unwrap();
+        let mut tree = parse_yaml(original_json).unwrap();
 
         // Modify a value
-        if let JsonValue::Object(ref mut entries) = tree.root_mut().value_mut() {
-            *entries[0].1.value_mut() = JsonValue::String("Bob".to_string());
+        if let YamlValue::Object(ref mut entries) = tree.root_mut().value_mut() {
+            *entries[0].1.value_mut() = YamlValue::String("Bob".to_string());
         }
 
         let config = Config::default();
 
         // Save
         let temp_file = NamedTempFile::new().unwrap();
-        save_json_file(temp_file.path(), &tree, &config).unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
 
         // Read back
         let saved_json = fs::read_to_string(temp_file.path()).unwrap();
@@ -840,7 +840,7 @@ mod tests {
 
     #[test]
     fn test_preserve_formatting_can_be_disabled() {
-        use crate::document::parser::parse_json;
+        use crate::document::parser::parse_yaml;
         use std::fs;
         use tempfile::NamedTempFile;
 
@@ -850,7 +850,7 @@ mod tests {
 }"#;
 
         // Parse
-        let tree = parse_json(original_json).unwrap();
+        let tree = parse_yaml(original_json).unwrap();
 
         // Disable format preservation
         let config = Config {
@@ -860,7 +860,7 @@ mod tests {
 
         // Save
         let temp_file = NamedTempFile::new().unwrap();
-        save_json_file(temp_file.path(), &tree, &config).unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
 
         // Read back
         let saved_json = fs::read_to_string(temp_file.path()).unwrap();
@@ -872,8 +872,8 @@ mod tests {
 
     #[test]
     fn test_edit_parent_invalidates_child_spans() {
-        use crate::document::node::JsonValue;
-        use crate::document::parser::parse_json;
+        use crate::document::node::YamlValue;
+        use crate::document::parser::parse_yaml;
         use std::fs;
         use tempfile::NamedTempFile;
 
@@ -892,11 +892,11 @@ mod tests {
   }
 }"#;
 
-        let mut tree = parse_json(original_json).unwrap();
+        let mut tree = parse_yaml(original_json).unwrap();
 
         // Navigate to company object and modify it
-        if let JsonValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
-            if let JsonValue::Object(ref mut company_entries) = root_entries[0].1.value_mut() {
+        if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
+            if let YamlValue::Object(ref mut company_entries) = root_entries[0].1.value_mut() {
                 // Rename "name" to "companyName" by modifying the first entry
                 company_entries[0].0 = "companyName".to_string();
 
@@ -905,7 +905,7 @@ mod tests {
                     1,
                     (
                         "employees".to_string(),
-                        crate::document::node::JsonNode::new(JsonValue::Number(23.0)),
+                        crate::document::node::YamlNode::new(YamlValue::Number(23.0)),
                     ),
                 );
             }
@@ -913,7 +913,7 @@ mod tests {
 
         let config = crate::config::Config::default();
         let temp_file = NamedTempFile::new().unwrap();
-        crate::file::saver::save_json_file(temp_file.path(), &tree, &config).unwrap();
+        crate::file::saver::save_yaml_file(temp_file.path(), &tree, &config).unwrap();
 
         let saved_json = fs::read_to_string(temp_file.path()).unwrap();
 
@@ -921,10 +921,10 @@ mod tests {
         // old byte positions, but the parent modification shifted everything
 
         // Verify the saved JSON is valid
-        let reparsed = serde_json::from_str::<serde_json::Value>(&saved_json);
+        let reparsed = serde_yaml::from_str::<serde_yaml::Value>(&saved_json);
         assert!(
             reparsed.is_ok(),
-            "Saved JSON should be valid, but got: {}",
+            "Saved YAML should be valid, but got: {}",
             saved_json
         );
 
@@ -976,21 +976,21 @@ mod tests {
     // Task 10: Saver gzip tests
 
     #[test]
-    fn test_save_json_as_gzipped() {
-        use crate::document::parser::parse_json;
+    fn test_save_yaml_as_gzipped() {
+        use crate::document::parser::parse_yaml;
         use flate2::read::GzDecoder;
         use std::io::Read;
         use tempfile::NamedTempFile;
 
         // Create JSON tree
         let json = r#"{"name": "Alice", "age": 30}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
         let config = Config::default();
 
         // Save as .json.gz
         let temp_file = NamedTempFile::new().unwrap();
         let gz_path = temp_file.path().with_extension("json.gz");
-        save_json_file(&gz_path, &tree, &config).unwrap();
+        save_yaml_file(&gz_path, &tree, &config).unwrap();
 
         // Decompress and verify
         let file = fs::File::open(&gz_path).unwrap();
@@ -998,42 +998,42 @@ mod tests {
         let mut decompressed = String::new();
         decoder.read_to_string(&mut decompressed).unwrap();
 
-        // Verify it's valid JSON
-        let parsed: serde_json::Value = serde_json::from_str(&decompressed).unwrap();
+        // Verify it's valid YAML
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&decompressed).unwrap();
         assert_eq!(parsed["name"], "Alice");
         assert_eq!(parsed["age"], 30);
     }
 
     #[test]
-    fn test_save_jsonl_as_gzipped() {
-        use crate::document::node::JsonValue;
+    fn test_save_yamll_as_gzipped() {
+        use crate::document::node::YamlValue;
         use flate2::read::GzDecoder;
         use std::io::Read;
         use tempfile::NamedTempFile;
 
-        // Create JSONL tree manually
+        // Create multi-document YAML tree manually
         let lines = vec![
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "id".to_string(),
-                JsonNode::new(JsonValue::Number(1.0)),
+                YamlNode::new(YamlValue::Number(1.0)),
             )])),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "id".to_string(),
-                JsonNode::new(JsonValue::Number(2.0)),
+                YamlNode::new(YamlValue::Number(2.0)),
             )])),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "id".to_string(),
-                JsonNode::new(JsonValue::Number(3.0)),
+                YamlNode::new(YamlValue::Number(3.0)),
             )])),
         ];
-        let root = JsonNode::new(JsonValue::JsonlRoot(lines));
-        let tree = JsonTree::new(root);
+        let root = YamlNode::new(YamlValue::MultiDoc(lines));
+        let tree = YamlTree::new(root);
         let config = Config::default();
 
-        // Save as .jsonl.gz
+        // Save as .yaml.gz
         let temp_file = NamedTempFile::new().unwrap();
         let gz_path = temp_file.path().with_extension("jsonl.gz");
-        save_json_file(&gz_path, &tree, &config).unwrap();
+        save_yaml_file(&gz_path, &tree, &config).unwrap();
 
         // Decompress and verify
         let file = fs::File::open(&gz_path).unwrap();
@@ -1041,25 +1041,25 @@ mod tests {
         let mut decompressed = String::new();
         decoder.read_to_string(&mut decompressed).unwrap();
 
-        // Verify JSONL format (one JSON per line)
+        // Verify multi-document YAML format (one JSON per line)
         let lines: Vec<&str> = decompressed.lines().collect();
         assert_eq!(lines.len(), 3);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(lines[0])
+            serde_yaml::from_str::<serde_yaml::Value>(lines[0])
                 .unwrap()
                 .get("id")
                 .unwrap(),
             1
         );
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(lines[1])
+            serde_yaml::from_str::<serde_yaml::Value>(lines[1])
                 .unwrap()
                 .get("id")
                 .unwrap(),
             2
         );
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(lines[2])
+            serde_yaml::from_str::<serde_yaml::Value>(lines[2])
                 .unwrap()
                 .get("id")
                 .unwrap(),
@@ -1071,27 +1071,27 @@ mod tests {
 
     #[test]
     fn test_format_switching_json_to_gz() {
-        use crate::document::parser::parse_json;
+        use crate::document::parser::parse_yaml;
         use flate2::read::GzDecoder;
         use std::io::Read;
         use tempfile::NamedTempFile;
 
         // Create and save as .json
         let json = r#"{"test": "value"}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
         let config = Config::default();
 
         let temp_file = NamedTempFile::new().unwrap();
-        let json_path = temp_file.path().with_extension("json");
-        save_json_file(&json_path, &tree, &config).unwrap();
+        let yaml_path = temp_file.path().with_extension("json");
+        save_yaml_file(&yaml_path, &tree, &config).unwrap();
 
         // Verify uncompressed
-        let content = fs::read_to_string(&json_path).unwrap();
+        let content = fs::read_to_string(&yaml_path).unwrap();
         assert!(content.contains("test"));
 
         // Save same tree as .json.gz
         let gz_path = temp_file.path().with_extension("json.gz");
-        save_json_file(&gz_path, &tree, &config).unwrap();
+        save_yaml_file(&gz_path, &tree, &config).unwrap();
 
         // Verify compressed
         let file = fs::File::open(&gz_path).unwrap();
@@ -1103,19 +1103,19 @@ mod tests {
 
     #[test]
     fn test_format_switching_gz_to_json() {
-        use crate::document::parser::parse_json;
+        use crate::document::parser::parse_yaml;
         use flate2::read::GzDecoder;
         use std::io::Read;
         use tempfile::NamedTempFile;
 
         // Create and save as .json.gz
         let json = r#"{"test": "value"}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
         let config = Config::default();
 
         let temp_file = NamedTempFile::new().unwrap();
         let gz_path = temp_file.path().with_extension("json.gz");
-        save_json_file(&gz_path, &tree, &config).unwrap();
+        save_yaml_file(&gz_path, &tree, &config).unwrap();
 
         // Verify compressed
         let file = fs::File::open(&gz_path).unwrap();
@@ -1125,15 +1125,15 @@ mod tests {
         assert!(decompressed.contains("test"));
 
         // Save same tree as .json (uncompressed)
-        let json_path = temp_file.path().with_extension("json");
-        save_json_file(&json_path, &tree, &config).unwrap();
+        let yaml_path = temp_file.path().with_extension("json");
+        save_yaml_file(&yaml_path, &tree, &config).unwrap();
 
         // Verify uncompressed
-        let content = fs::read_to_string(&json_path).unwrap();
+        let content = fs::read_to_string(&yaml_path).unwrap();
         assert!(content.contains("test"));
 
         // Verify it's NOT gzip (won't start with gzip magic bytes)
-        let raw_bytes = fs::read(&json_path).unwrap();
+        let raw_bytes = fs::read(&yaml_path).unwrap();
         assert_ne!(&raw_bytes[0..2], &[0x1f, 0x8b]); // gzip magic bytes
     }
 
@@ -1141,28 +1141,28 @@ mod tests {
 
     #[test]
     fn test_backup_preserves_compression() {
-        use crate::document::parser::parse_json;
+        use crate::document::parser::parse_yaml;
         use flate2::read::GzDecoder;
         use std::io::Read;
         use tempfile::NamedTempFile;
 
         // Create initial .json.gz file
         let json = r#"{"version": 1}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
         let config = Config::default();
 
         let temp_file = NamedTempFile::new().unwrap();
         let gz_path = temp_file.path().with_extension("json.gz");
-        save_json_file(&gz_path, &tree, &config).unwrap();
+        save_yaml_file(&gz_path, &tree, &config).unwrap();
 
         // Modify and save with backup enabled
         let json2 = r#"{"version": 2}"#;
-        let tree2 = parse_json(json2).unwrap();
+        let tree2 = parse_yaml(json2).unwrap();
         let config_with_backup = Config {
             create_backup: true,
             ..Default::default()
         };
-        save_json_file(&gz_path, &tree2, &config_with_backup).unwrap();
+        save_yaml_file(&gz_path, &tree2, &config_with_backup).unwrap();
 
         // Verify backup was created
         let backup_path = gz_path.with_file_name(format!(
@@ -1178,7 +1178,7 @@ mod tests {
         decoder.read_to_string(&mut decompressed).unwrap();
 
         // Verify backup contains original version
-        let parsed: serde_json::Value = serde_json::from_str(&decompressed).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&decompressed).unwrap();
         assert_eq!(parsed["version"], 1);
 
         // Verify new file contains updated version
@@ -1186,7 +1186,7 @@ mod tests {
         let mut decoder2 = GzDecoder::new(file2);
         let mut decompressed2 = String::new();
         decoder2.read_to_string(&mut decompressed2).unwrap();
-        let parsed2: serde_json::Value = serde_json::from_str(&decompressed2).unwrap();
+        let parsed2: serde_yaml::Value = serde_yaml::from_str(&decompressed2).unwrap();
         assert_eq!(parsed2["version"], 2);
     }
 }

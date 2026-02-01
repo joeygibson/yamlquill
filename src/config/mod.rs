@@ -1,13 +1,13 @@
-//! Configuration system for jsonquill.
+//! Configuration system for yamlquill.
 //!
-//! This module provides the configuration structure for jsonquill with sensible defaults
+//! This module provides the configuration structure for yamlquill with sensible defaults
 //! and support for serialization/deserialization via serde. Configuration can be loaded
 //! from TOML files and merged with command-line arguments.
 //!
 //! # Example
 //!
 //! ```
-//! use jsonquill::config::Config;
+//! use yamlquill::config::Config;
 //!
 //! // Use default configuration
 //! let config = Config::default();
@@ -24,9 +24,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Configuration for the jsonquill application.
+/// Configuration for the yamlquill application.
 ///
-/// This structure contains all configurable settings for jsonquill, including
+/// This structure contains all configurable settings for yamlquill, including
 /// display preferences, editing behavior, performance tuning, and feature flags.
 /// All fields have sensible defaults via `Config::default()`.
 ///
@@ -160,7 +160,7 @@ impl Default for Config {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::config::Config;
+    /// use yamlquill::config::Config;
     ///
     /// let config = Config::default();
     /// assert_eq!(config.theme, "default-dark");
@@ -188,11 +188,11 @@ impl Default for Config {
 impl Config {
     /// Returns the path to the config file.
     ///
-    /// Uses `~/.config/jsonquill/config.toml` on all platforms.
+    /// Uses `~/.config/yamlquill/config.toml` on all platforms.
     pub fn config_path() -> Option<std::path::PathBuf> {
         dirs::home_dir().map(|mut path| {
             path.push(".config");
-            path.push("jsonquill");
+            path.push("yamlquill");
             path.push("config.toml");
             path
         })

@@ -1,9 +1,9 @@
-//! JSONPath query string parser.
+//! YAMLPath query string parser.
 
-use super::ast::{JsonPath, PathSegment};
-use super::error::JsonPathError;
+use super::ast::{YamlPath, PathSegment};
+use super::error::YamlPathError;
 
-/// Parser for JSONPath query strings.
+/// Parser for YAMLPath query strings.
 pub struct Parser {
     input: String,
     position: usize,
@@ -18,21 +18,21 @@ impl Parser {
         }
     }
 
-    /// Parses the query string into a JsonPath.
-    pub fn parse(query: &str) -> Result<JsonPath, JsonPathError> {
+    /// Parses the query string into a YamlPath.
+    pub fn parse(query: &str) -> Result<YamlPath, YamlPathError> {
         let mut parser = Parser::new(query);
         parser.parse_path()
     }
 
-    fn parse_path(&mut self) -> Result<JsonPath, JsonPathError> {
+    fn parse_path(&mut self) -> Result<YamlPath, YamlPathError> {
         let mut segments = Vec::new();
 
         self.skip_whitespace();
 
         // Expect root ($)
         if self.peek() != Some('$') {
-            return Err(JsonPathError::InvalidSyntax {
-                message: "JSONPath must start with '$'".to_string(),
+            return Err(YamlPathError::InvalidSyntax {
+                message: "YAMLPath must start with '$'".to_string(),
             });
         }
         self.next();
@@ -61,7 +61,7 @@ impl Parser {
             }
         }
 
-        Ok(JsonPath::new(segments))
+        Ok(YamlPath::new(segments))
     }
 
     /// Returns the current character without advancing.
@@ -93,24 +93,24 @@ impl Parser {
     }
 
     /// Expects a specific character and advances, or returns an error.
-    fn expect(&mut self, expected: char) -> Result<(), JsonPathError> {
+    fn expect(&mut self, expected: char) -> Result<(), YamlPathError> {
         self.skip_whitespace();
         let pos = self.position; // Save position before advancing
         match self.next() {
             Some(ch) if ch == expected => Ok(()),
-            Some(ch) => Err(JsonPathError::UnexpectedToken {
+            Some(ch) => Err(YamlPathError::UnexpectedToken {
                 position: pos, // Use saved position
                 found: ch.to_string(),
                 expected: format!("'{}'", expected),
             }),
-            None => Err(JsonPathError::UnexpectedEnd {
+            None => Err(YamlPathError::UnexpectedEnd {
                 expected: format!("'{}'", expected),
             }),
         }
     }
 
     /// Parses an identifier (property name).
-    fn parse_identifier(&mut self) -> Result<String, JsonPathError> {
+    fn parse_identifier(&mut self) -> Result<String, YamlPathError> {
         self.skip_whitespace();
         let mut name = String::new();
         while let Some(ch) = self.peek() {
@@ -122,7 +122,7 @@ impl Parser {
             }
         }
         if name.is_empty() {
-            Err(JsonPathError::InvalidSyntax {
+            Err(YamlPathError::InvalidSyntax {
                 message: "Expected identifier".to_string(),
             })
         } else {
@@ -131,7 +131,7 @@ impl Parser {
     }
 
     /// Parses recursive descent (..)
-    fn parse_recursive_descent(&mut self) -> Result<PathSegment, JsonPathError> {
+    fn parse_recursive_descent(&mut self) -> Result<PathSegment, YamlPathError> {
         self.expect('.')?;
         if self.peek() == Some('[') {
             Ok(PathSegment::RecursiveDescent(None))
@@ -145,7 +145,7 @@ impl Parser {
     }
 
     /// Parses bracket expression: [index], [start:end], ['key'], [*]
-    fn parse_bracket_expression(&mut self) -> Result<PathSegment, JsonPathError> {
+    fn parse_bracket_expression(&mut self) -> Result<PathSegment, YamlPathError> {
         self.expect('[')?;
         self.skip_whitespace();
 
@@ -196,7 +196,7 @@ impl Parser {
             }
             Some(':') => self.parse_slice()?,
             _ => {
-                return Err(JsonPathError::InvalidSyntax {
+                return Err(YamlPathError::InvalidSyntax {
                     message: "Invalid bracket expression".to_string(),
                 })
             }
@@ -206,7 +206,7 @@ impl Parser {
     }
 
     /// Parses string(s) inside brackets: ['key'] or ['key1','key2']
-    fn parse_bracket_string(&mut self) -> Result<Vec<String>, JsonPathError> {
+    fn parse_bracket_string(&mut self) -> Result<Vec<String>, YamlPathError> {
         let mut properties = Vec::new();
         loop {
             self.skip_whitespace();
@@ -227,14 +227,14 @@ impl Parser {
                         Some('\'') => value.push('\''),
                         Some('"') => value.push('"'),
                         Some(_) | None => {
-                            return Err(JsonPathError::InvalidSyntax {
+                            return Err(YamlPathError::InvalidSyntax {
                                 message: "Invalid escape sequence".to_string(),
                             })
                         }
                     },
                     Some(ch) => value.push(ch),
                     None => {
-                        return Err(JsonPathError::UnexpectedEnd {
+                        return Err(YamlPathError::UnexpectedEnd {
                             expected: format!("closing quote '{}'", quote),
                         })
                     }
@@ -253,17 +253,17 @@ impl Parser {
     }
 
     /// Parses a number inside brackets
-    fn parse_bracket_number(&mut self) -> Result<isize, JsonPathError> {
+    fn parse_bracket_number(&mut self) -> Result<isize, YamlPathError> {
         let num_str = self.parse_number_string()?;
         num_str
             .parse::<isize>()
-            .map_err(|_| JsonPathError::InvalidSyntax {
+            .map_err(|_| YamlPathError::InvalidSyntax {
                 message: format!("Invalid number: {}", num_str),
             })
     }
 
     /// Parses a number as a string
-    fn parse_number_string(&mut self) -> Result<String, JsonPathError> {
+    fn parse_number_string(&mut self) -> Result<String, YamlPathError> {
         let mut num = String::new();
         if self.peek() == Some('-') {
             num.push('-');
@@ -278,7 +278,7 @@ impl Parser {
             }
         }
         if num.is_empty() || num == "-" {
-            Err(JsonPathError::InvalidSyntax {
+            Err(YamlPathError::InvalidSyntax {
                 message: "Expected number".to_string(),
             })
         } else {
@@ -287,7 +287,7 @@ impl Parser {
     }
 
     /// Parses array slice: [start:end], [start:], [:end], [:]
-    fn parse_slice(&mut self) -> Result<PathSegment, JsonPathError> {
+    fn parse_slice(&mut self) -> Result<PathSegment, YamlPathError> {
         let start = if self.peek() == Some(':') {
             None
         } else {
@@ -310,7 +310,7 @@ impl Parser {
         // Validate slice bounds
         if let (Some(s), Some(e)) = (start, end) {
             if s >= 0 && e >= 0 && s > e {
-                return Err(JsonPathError::InvalidSyntax {
+                return Err(YamlPathError::InvalidSyntax {
                     message: format!("Invalid slice: start ({}) > end ({})", s, e),
                 });
             }

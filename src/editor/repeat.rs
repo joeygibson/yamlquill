@@ -1,6 +1,6 @@
 //! Repeatable command tracking for the '.' key.
 
-use crate::document::node::JsonValue;
+use crate::document::node::YamlValue;
 
 /// Represents a command that can be repeated with the '.' key.
 ///
@@ -21,7 +21,7 @@ pub enum RepeatableCommand {
     /// Add scalar value (i)
     /// key is Some for object insertions, None for arrays
     Add {
-        value: JsonValue,
+        value: YamlValue,
         key: Option<String>,
     },
 

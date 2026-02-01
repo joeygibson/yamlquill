@@ -1,15 +1,15 @@
-use crate::document::node::JsonNode;
+use crate::document::node::YamlNode;
 use std::collections::HashMap;
 
 /// Content stored in a register (nodes + optional keys for object members)
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegisterContent {
-    pub nodes: Vec<JsonNode>,
+    pub nodes: Vec<YamlNode>,
     pub keys: Vec<Option<String>>,
 }
 
 impl RegisterContent {
-    pub fn new(nodes: Vec<JsonNode>, keys: Vec<Option<String>>) -> Self {
+    pub fn new(nodes: Vec<YamlNode>, keys: Vec<Option<String>>) -> Self {
         Self { nodes, keys }
     }
 
@@ -128,11 +128,11 @@ impl Default for RegisterSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{JsonNode, JsonValue};
+    use crate::document::node::{YamlNode, YamlValue};
 
     #[test]
     fn test_register_content_new() {
-        let node = JsonNode::new(JsonValue::String("test".to_string()));
+        let node = YamlNode::new(YamlValue::String("test".to_string()));
         let content = RegisterContent::new(vec![node.clone()], vec![None]);
 
         assert_eq!(content.nodes.len(), 1);
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn test_register_set_named() {
         let mut regs = RegisterSet::new();
-        let node = JsonNode::new(JsonValue::Number(42.0));
+        let node = YamlNode::new(YamlValue::Number(42.0));
         let content = RegisterContent::new(vec![node.clone()], vec![None]);
 
         regs.set_named('a', content.clone());
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn test_register_set_unnamed() {
         let mut regs = RegisterSet::new();
-        let node = JsonNode::new(JsonValue::Boolean(true));
+        let node = YamlNode::new(YamlValue::Boolean(true));
         let content = RegisterContent::new(vec![node.clone()], vec![None]);
 
         regs.set_unnamed(content.clone());
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn test_register_set_numbered() {
         let mut regs = RegisterSet::new();
-        let node = JsonNode::new(JsonValue::Null);
+        let node = YamlNode::new(YamlValue::Null);
         let content = RegisterContent::new(vec![node.clone()], vec![None]);
 
         regs.set_numbered(5, content.clone());
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn test_register_numbered_valid_range() {
         let mut regs = RegisterSet::new();
-        let node = JsonNode::new(JsonValue::String("test".to_string()));
+        let node = YamlNode::new(YamlValue::String("test".to_string()));
         let content = RegisterContent::new(vec![node.clone()], vec![None]);
 
         // Test all valid indices 0-9
@@ -200,8 +200,8 @@ mod tests {
     #[test]
     fn test_register_append_named() {
         let mut regs = RegisterSet::new();
-        let node1 = JsonNode::new(JsonValue::Number(1.0));
-        let node2 = JsonNode::new(JsonValue::Number(2.0));
+        let node1 = YamlNode::new(YamlValue::Number(1.0));
+        let node2 = YamlNode::new(YamlValue::Number(2.0));
 
         regs.set_named('a', RegisterContent::new(vec![node1.clone()], vec![None]));
         regs.append_named('a', RegisterContent::new(vec![node2.clone()], vec![None]));
@@ -213,9 +213,9 @@ mod tests {
     #[test]
     fn test_register_push_delete_history() {
         let mut regs = RegisterSet::new();
-        let node1 = JsonNode::new(JsonValue::Number(1.0));
-        let node2 = JsonNode::new(JsonValue::Number(2.0));
-        let node3 = JsonNode::new(JsonValue::Number(3.0));
+        let node1 = YamlNode::new(YamlValue::Number(1.0));
+        let node2 = YamlNode::new(YamlValue::Number(2.0));
+        let node3 = YamlNode::new(YamlValue::Number(3.0));
 
         regs.push_delete_history(RegisterContent::new(vec![node1.clone()], vec![None]));
         regs.push_delete_history(RegisterContent::new(vec![node2.clone()], vec![None]));
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn test_register_update_yank_register() {
         let mut regs = RegisterSet::new();
-        let node = JsonNode::new(JsonValue::Boolean(true));
+        let node = YamlNode::new(YamlValue::Boolean(true));
         let content = RegisterContent::new(vec![node.clone()], vec![None]);
 
         regs.update_yank_register(content.clone());
@@ -242,8 +242,8 @@ mod tests {
     #[test]
     fn test_register_get_unified() {
         let mut regs = RegisterSet::new();
-        let node1 = JsonNode::new(JsonValue::Number(1.0));
-        let node2 = JsonNode::new(JsonValue::Number(2.0));
+        let node1 = YamlNode::new(YamlValue::Number(1.0));
+        let node2 = YamlNode::new(YamlValue::Number(2.0));
 
         // Set a named register
         regs.set_named('a', RegisterContent::new(vec![node1.clone()], vec![None]));

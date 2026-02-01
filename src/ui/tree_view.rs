@@ -5,8 +5,8 @@
 //! - `ValueType`: Classification of JSON value types
 //! - `TreeViewState`: Manages the list of visible lines and expand/collapse state
 
-use crate::document::node::{JsonNode, JsonValue};
-use crate::document::tree::JsonTree;
+use crate::document::node::{YamlNode, YamlValue};
+use crate::document::tree::YamlTree;
 use std::collections::HashSet;
 
 /// Represents a single line in the tree view display.
@@ -49,26 +49,26 @@ pub enum ValueType {
 }
 
 impl ValueType {
-    /// Determines the value type from a JsonValue.
+    /// Determines the value type from a YamlValue.
     ///
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::JsonValue;
-    /// use jsonquill::ui::tree_view::ValueType;
+    /// use yamlquill::document::node::YamlValue;
+    /// use yamlquill::ui::tree_view::ValueType;
     ///
-    /// let value = JsonValue::String("hello".to_string());
-    /// assert_eq!(ValueType::from_json_value(&value), ValueType::String);
+    /// let value = YamlValue::String("hello".to_string());
+    /// assert_eq!(ValueType::from_yaml_value(&value), ValueType::String);
     /// ```
-    pub fn from_json_value(value: &JsonValue) -> Self {
+    pub fn from_yaml_value(value: &YamlValue) -> Self {
         match value {
-            JsonValue::Object(_) => ValueType::Object,
-            JsonValue::Array(_) => ValueType::Array,
-            JsonValue::String(_) => ValueType::String,
-            JsonValue::Number(_) => ValueType::Number,
-            JsonValue::Boolean(_) => ValueType::Boolean,
-            JsonValue::Null => ValueType::Null,
-            JsonValue::JsonlRoot(_) => ValueType::Array, // Treat JSONL root like array for display
+            YamlValue::Object(_) => ValueType::Object,
+            YamlValue::Array(_) => ValueType::Array,
+            YamlValue::String(_) => ValueType::String,
+            YamlValue::Number(_) => ValueType::Number,
+            YamlValue::Boolean(_) => ValueType::Boolean,
+            YamlValue::Null => ValueType::Null,
+            YamlValue::MultiDoc(_) => ValueType::Array, // Treat multi-document YAML root like array for display
         }
     }
 }
@@ -82,12 +82,12 @@ impl ValueType {
 /// # Example
 ///
 /// ```
-/// use jsonquill::document::node::{JsonNode, JsonValue};
-/// use jsonquill::document::tree::JsonTree;
-/// use jsonquill::ui::tree_view::TreeViewState;
+/// use yamlquill::document::node::{YamlNode, YamlValue};
+/// use yamlquill::document::tree::YamlTree;
+/// use yamlquill::ui::tree_view::TreeViewState;
 ///
-/// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-///     ("name".to_string(), JsonNode::new(JsonValue::String("Alice".to_string()))),
+/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+///     ("name".to_string(), YamlNode::new(YamlValue::String("Alice".to_string()))),
 /// ])));
 ///
 /// let mut state = TreeViewState::new();
@@ -131,8 +131,8 @@ impl TreeViewState {
 
     /// Expands a specific node and all its descendants.
     ///
-    /// This is used when expanding JSONL lines to show the entire tree within the line.
-    pub fn expand_node_and_descendants(&mut self, tree: &JsonTree, path: &[usize]) {
+    /// This is used when expanding multi-document YAML lines to show the entire tree within the line.
+    pub fn expand_node_and_descendants(&mut self, tree: &YamlTree, path: &[usize]) {
         // First expand the node itself
         self.expanded_paths.insert(path.to_vec());
 
@@ -145,7 +145,7 @@ impl TreeViewState {
     /// Collapses a specific node and all its descendants.
     ///
     /// Removes the expansion state for the node and all paths underneath it.
-    pub fn collapse_node_and_descendants(&mut self, tree: &JsonTree, path: &[usize]) {
+    pub fn collapse_node_and_descendants(&mut self, tree: &YamlTree, path: &[usize]) {
         // First collapse the node itself
         self.expanded_paths.remove(path);
 
@@ -158,13 +158,13 @@ impl TreeViewState {
     /// Rebuilds the list of visible lines from the JSON tree.
     ///
     /// This should be called after the tree changes or expand/collapse state changes.
-    pub fn rebuild(&mut self, tree: &JsonTree) {
+    pub fn rebuild(&mut self, tree: &YamlTree) {
         self.lines.clear();
 
-        // Handle JSONL root specially - render as flat list
+        // Handle multi-document YAML root specially - render as flat list
         match tree.root().value() {
-            JsonValue::JsonlRoot(lines) => {
-                self.render_jsonl_root(lines);
+            YamlValue::MultiDoc(lines) => {
+                self.render_multidoc_root(lines);
             }
             _ => {
                 self.build_lines(tree.root(), &[], 0);
@@ -172,11 +172,11 @@ impl TreeViewState {
         }
     }
 
-    /// Renders JSONL root as a flat list of collapsed lines.
+    /// Renders multi-document YAML root as a flat list of collapsed lines.
     ///
-    /// Each line in the JSONL document is shown at depth 0, collapsed by default.
+    /// Each line in the multi-document YAML document is shown at depth 0, collapsed by default.
     /// Users can expand individual lines to see their contents.
-    fn render_jsonl_root(&mut self, lines: &[JsonNode]) {
+    fn render_multidoc_root(&mut self, lines: &[YamlNode]) {
         for (idx, node) in lines.iter().enumerate() {
             let path = vec![idx];
             let is_expanded = self.is_expanded(&path);
@@ -187,7 +187,7 @@ impl TreeViewState {
                 path: path.clone(),
                 depth: 0,
                 key: None,
-                value_type: ValueType::from_json_value(node.value()),
+                value_type: ValueType::from_yaml_value(node.value()),
                 value_preview: preview,
                 expandable: true,
                 expanded: is_expanded,
@@ -205,13 +205,13 @@ impl TreeViewState {
     /// This is typically called when initially loading a file to show
     /// the full structure. After calling this, call `rebuild()` to
     /// regenerate the visible lines.
-    pub fn expand_all(&mut self, tree: &JsonTree) {
+    pub fn expand_all(&mut self, tree: &YamlTree) {
         self.expand_all_recursive(tree.root(), &[]);
     }
 
-    fn expand_all_recursive(&mut self, node: &JsonNode, path: &[usize]) {
+    fn expand_all_recursive(&mut self, node: &YamlNode, path: &[usize]) {
         match node.value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 for (i, (_, child)) in entries.iter().enumerate() {
                     let child_path: Vec<usize> =
                         path.iter().copied().chain(std::iter::once(i)).collect();
@@ -221,7 +221,7 @@ impl TreeViewState {
                     }
                 }
             }
-            JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+            YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 for (i, child) in elements.iter().enumerate() {
                     let child_path: Vec<usize> =
                         path.iter().copied().chain(std::iter::once(i)).collect();
@@ -235,9 +235,9 @@ impl TreeViewState {
         }
     }
 
-    fn collapse_all_recursive(&mut self, node: &JsonNode, path: &[usize]) {
+    fn collapse_all_recursive(&mut self, node: &YamlNode, path: &[usize]) {
         match node.value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 for (i, (_, child)) in entries.iter().enumerate() {
                     let child_path: Vec<usize> =
                         path.iter().copied().chain(std::iter::once(i)).collect();
@@ -247,7 +247,7 @@ impl TreeViewState {
                     }
                 }
             }
-            JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+            YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 for (i, child) in elements.iter().enumerate() {
                     let child_path: Vec<usize> =
                         path.iter().copied().chain(std::iter::once(i)).collect();
@@ -261,9 +261,9 @@ impl TreeViewState {
         }
     }
 
-    fn build_lines(&mut self, node: &JsonNode, path: &[usize], depth: usize) {
+    fn build_lines(&mut self, node: &YamlNode, path: &[usize], depth: usize) {
         match node.value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 for (i, (key, child)) in entries.iter().enumerate() {
                     let child_path: Vec<usize> =
                         path.iter().copied().chain(std::iter::once(i)).collect();
@@ -280,7 +280,7 @@ impl TreeViewState {
                         path: child_path.clone(),
                         depth,
                         key: Some(key.clone()),
-                        value_type: ValueType::from_json_value(child.value()),
+                        value_type: ValueType::from_yaml_value(child.value()),
                         value_preview,
                         expandable: child.value().is_container(),
                         expanded,
@@ -291,7 +291,7 @@ impl TreeViewState {
                     }
                 }
             }
-            JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+            YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 for (i, child) in elements.iter().enumerate() {
                     let child_path: Vec<usize> =
                         path.iter().copied().chain(std::iter::once(i)).collect();
@@ -308,7 +308,7 @@ impl TreeViewState {
                         path: child_path.clone(),
                         depth,
                         key: Some(format!("[{}]", i)),
-                        value_type: ValueType::from_json_value(child.value()),
+                        value_type: ValueType::from_yaml_value(child.value()),
                         value_preview,
                         expandable: child.value().is_container(),
                         expanded,
@@ -323,16 +323,16 @@ impl TreeViewState {
         }
     }
 
-    fn get_value_preview(&self, value: &JsonValue) -> String {
+    fn get_value_preview(&self, value: &YamlValue) -> String {
         match value {
-            JsonValue::Object(entries) => format!("{{ {} fields }}", entries.len()),
-            JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+            YamlValue::Object(entries) => format!("{{ {} fields }}", entries.len()),
+            YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 format!("[ {} items ]", elements.len())
             }
-            JsonValue::String(s) => format!("\"{}\"", s),
-            JsonValue::Number(n) => n.to_string(),
-            JsonValue::Boolean(b) => b.to_string(),
-            JsonValue::Null => "null".to_string(),
+            YamlValue::String(s) => format!("\"{}\"", s),
+            YamlValue::Number(n) => n.to_string(),
+            YamlValue::Boolean(b) => b.to_string(),
+            YamlValue::Null => "null".to_string(),
         }
     }
 
@@ -495,11 +495,11 @@ use ratatui::{
 /// # Example
 ///
 /// ```no_run
-/// use jsonquill::ui::tree_view::{render_tree_view, TreeViewState};
-/// use jsonquill::editor::cursor::Cursor;
-/// use jsonquill::theme::colors::ThemeColors;
-/// use jsonquill::document::node::{JsonNode, JsonValue};
-/// use jsonquill::document::tree::JsonTree;
+/// use yamlquill::ui::tree_view::{render_tree_view, TreeViewState};
+/// use yamlquill::editor::cursor::Cursor;
+/// use yamlquill::theme::colors::ThemeColors;
+/// use yamlquill::document::node::{YamlNode, YamlValue};
+/// use yamlquill::document::tree::YamlTree;
 /// use ratatui::backend::TestBackend;
 /// use ratatui::Terminal;
 /// use ratatui::layout::Rect;
@@ -509,8 +509,8 @@ use ratatui::{
 /// let colors = ThemeColors::default_dark();
 /// let cursor = Cursor::new();
 ///
-/// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-///     ("name".to_string(), JsonNode::new(JsonValue::String("Alice".to_string()))),
+/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+///     ("name".to_string(), YamlNode::new(YamlValue::String("Alice".to_string()))),
 /// ])));
 /// let mut tree_view = TreeViewState::new();
 /// tree_view.rebuild(&tree);
@@ -677,22 +677,22 @@ fn format_number(n: f64) -> String {
 ///         (N) [elem1, elem2, ...] for arrays
 ///
 /// Truncates at max_chars with "..." if needed.
-pub fn format_collapsed_preview(node: &JsonNode, max_chars: usize) -> String {
+pub fn format_collapsed_preview(node: &YamlNode, max_chars: usize) -> String {
     match node.value() {
-        JsonValue::Object(fields) => format_collapsed_object(fields, max_chars),
-        JsonValue::Array(elements) => format_collapsed_array(elements, max_chars),
-        JsonValue::JsonlRoot(lines) => {
+        YamlValue::Object(fields) => format_collapsed_object(fields, max_chars),
+        YamlValue::Array(elements) => format_collapsed_array(elements, max_chars),
+        YamlValue::MultiDoc(lines) => {
             // Shouldn't happen, but treat like array
             format_collapsed_array(lines, max_chars)
         }
-        JsonValue::String(s) => format!("\"{}\"", s),
-        JsonValue::Number(n) => format_number(*n),
-        JsonValue::Boolean(b) => format!("{}", b),
-        JsonValue::Null => "null".to_string(),
+        YamlValue::String(s) => format!("\"{}\"", s),
+        YamlValue::Number(n) => format_number(*n),
+        YamlValue::Boolean(b) => format!("{}", b),
+        YamlValue::Null => "null".to_string(),
     }
 }
 
-fn format_collapsed_object(fields: &[(String, JsonNode)], max_chars: usize) -> String {
+fn format_collapsed_object(fields: &[(String, YamlNode)], max_chars: usize) -> String {
     if fields.is_empty() {
         return "{…}".to_string();
     }
@@ -715,9 +715,9 @@ fn format_collapsed_object(fields: &[(String, JsonNode)], max_chars: usize) -> S
 
         // Add value
         let value_str = match value.value() {
-            JsonValue::Object(_) => "{…}".to_string(),
-            JsonValue::Array(_) | JsonValue::JsonlRoot(_) => "[…]".to_string(),
-            JsonValue::String(s) => {
+            YamlValue::Object(_) => "{…}".to_string(),
+            YamlValue::Array(_) | YamlValue::MultiDoc(_) => "[…]".to_string(),
+            YamlValue::String(s) => {
                 let quoted = format!("\"{}\"", s);
                 if preview.len() + quoted.len() > max_chars {
                     // Use char-based truncation to avoid UTF-8 boundary panics
@@ -727,9 +727,9 @@ fn format_collapsed_object(fields: &[(String, JsonNode)], max_chars: usize) -> S
                     quoted
                 }
             }
-            JsonValue::Number(n) => format_number(*n),
-            JsonValue::Boolean(b) => format!("{}", b),
-            JsonValue::Null => "null".to_string(),
+            YamlValue::Number(n) => format_number(*n),
+            YamlValue::Boolean(b) => format!("{}", b),
+            YamlValue::Null => "null".to_string(),
         };
 
         preview.push_str(&value_str);
@@ -748,7 +748,7 @@ fn format_collapsed_object(fields: &[(String, JsonNode)], max_chars: usize) -> S
     preview
 }
 
-fn format_collapsed_array(elements: &[JsonNode], max_chars: usize) -> String {
+fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
     if elements.is_empty() {
         return "[…]".to_string();
     }
@@ -766,9 +766,9 @@ fn format_collapsed_array(elements: &[JsonNode], max_chars: usize) -> String {
         }
 
         let value_str = match element.value() {
-            JsonValue::Object(_) => "{…}".to_string(),
-            JsonValue::Array(_) | JsonValue::JsonlRoot(_) => "[…]".to_string(),
-            JsonValue::String(s) => {
+            YamlValue::Object(_) => "{…}".to_string(),
+            YamlValue::Array(_) | YamlValue::MultiDoc(_) => "[…]".to_string(),
+            YamlValue::String(s) => {
                 let quoted = format!("\"{}\"", s);
                 // Check length to avoid exceeding max_chars with long strings
                 if preview.len() + quoted.len() > max_chars {
@@ -779,9 +779,9 @@ fn format_collapsed_array(elements: &[JsonNode], max_chars: usize) -> String {
                     quoted
                 }
             }
-            JsonValue::Number(n) => format_number(*n),
-            JsonValue::Boolean(b) => format!("{}", b),
-            JsonValue::Null => "null".to_string(),
+            YamlValue::Number(n) => format_number(*n),
+            YamlValue::Boolean(b) => format!("{}", b),
+            YamlValue::Null => "null".to_string(),
         };
 
         preview.push_str(&value_str);
@@ -805,27 +805,27 @@ mod tests {
     #[test]
     fn test_value_type_from_json() {
         assert_eq!(
-            ValueType::from_json_value(&JsonValue::Object(vec![])),
+            ValueType::from_yaml_value(&YamlValue::Object(vec![])),
             ValueType::Object
         );
         assert_eq!(
-            ValueType::from_json_value(&JsonValue::Array(vec![])),
+            ValueType::from_yaml_value(&YamlValue::Array(vec![])),
             ValueType::Array
         );
         assert_eq!(
-            ValueType::from_json_value(&JsonValue::String("x".to_string())),
+            ValueType::from_yaml_value(&YamlValue::String("x".to_string())),
             ValueType::String
         );
         assert_eq!(
-            ValueType::from_json_value(&JsonValue::Number(42.0)),
+            ValueType::from_yaml_value(&YamlValue::Number(42.0)),
             ValueType::Number
         );
         assert_eq!(
-            ValueType::from_json_value(&JsonValue::Boolean(true)),
+            ValueType::from_yaml_value(&YamlValue::Boolean(true)),
             ValueType::Boolean
         );
         assert_eq!(
-            ValueType::from_json_value(&JsonValue::Null),
+            ValueType::from_yaml_value(&YamlValue::Null),
             ValueType::Null
         );
     }
@@ -838,12 +838,12 @@ mod tests {
 
     #[test]
     fn test_rebuild_with_flat_object() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
             (
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Alice".to_string())),
+                YamlNode::new(YamlValue::String("Alice".to_string())),
             ),
-            ("age".to_string(), JsonNode::new(JsonValue::Number(30.0))),
+            ("age".to_string(), YamlNode::new(YamlValue::Number(30.0))),
         ])));
 
         let mut state = TreeViewState::new();
@@ -857,9 +857,9 @@ mod tests {
 
     #[test]
     fn test_rebuild_with_array() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Array(vec![
-            JsonNode::new(JsonValue::Number(1.0)),
-            JsonNode::new(JsonValue::Number(2.0)),
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![
+            YamlNode::new(YamlValue::Number(1.0)),
+            YamlNode::new(YamlValue::Number(2.0)),
         ])));
 
         let mut state = TreeViewState::new();
@@ -886,11 +886,11 @@ mod tests {
 
     #[test]
     fn test_nested_object_collapsed() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "user".to_string(),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Bob".to_string())),
+                YamlNode::new(YamlValue::String("Bob".to_string())),
             )])),
         )])));
 
@@ -905,11 +905,11 @@ mod tests {
 
     #[test]
     fn test_nested_object_expanded() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "user".to_string(),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Bob".to_string())),
+                YamlNode::new(YamlValue::String("Bob".to_string())),
             )])),
         )])));
 
@@ -931,15 +931,15 @@ mod tests {
 
         // Scalars still use simple format
         assert_eq!(
-            state.get_value_preview(&JsonValue::String("test".to_string())),
+            state.get_value_preview(&YamlValue::String("test".to_string())),
             "\"test\""
         );
         assert_eq!(
-            state.get_value_preview(&JsonValue::Number(std::f64::consts::PI)),
+            state.get_value_preview(&YamlValue::Number(std::f64::consts::PI)),
             std::f64::consts::PI.to_string()
         );
-        assert_eq!(state.get_value_preview(&JsonValue::Boolean(true)), "true");
-        assert_eq!(state.get_value_preview(&JsonValue::Null), "null");
+        assert_eq!(state.get_value_preview(&YamlValue::Boolean(true)), "true");
+        assert_eq!(state.get_value_preview(&YamlValue::Null), "null");
 
         // Containers are now handled by format_collapsed_preview in build_lines
         // so get_value_preview is only used for expanded containers (which show nothing)
@@ -951,12 +951,12 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
             (
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Alice".to_string())),
+                YamlNode::new(YamlValue::String("Alice".to_string())),
             ),
-            ("age".to_string(), JsonNode::new(JsonValue::Number(30.0))),
+            ("age".to_string(), YamlNode::new(YamlValue::Number(30.0))),
         ])));
 
         let mut state = TreeViewState::new();
@@ -1004,9 +1004,9 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "name".to_string(),
-            JsonNode::new(JsonValue::String("Alice".to_string())),
+            YamlNode::new(YamlValue::String("Alice".to_string())),
         )])));
 
         let mut state = TreeViewState::new();
@@ -1074,9 +1074,9 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "name".to_string(),
-            JsonNode::new(JsonValue::String("Alice".to_string())),
+            YamlNode::new(YamlValue::String("Alice".to_string())),
         )])));
 
         let mut state = TreeViewState::new();
@@ -1123,13 +1123,13 @@ mod tests {
 
     #[test]
     fn test_format_collapsed_preview_simple_object() {
-        use crate::document::node::{JsonNode, JsonValue};
+        use crate::document::node::{YamlNode, YamlValue};
 
-        let obj = JsonNode::new(JsonValue::Object(vec![
-            ("id".to_string(), JsonNode::new(JsonValue::Number(1.0))),
+        let obj = YamlNode::new(YamlValue::Object(vec![
+            ("id".to_string(), YamlNode::new(YamlValue::Number(1.0))),
             (
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Alice".to_string())),
+                YamlNode::new(YamlValue::String("Alice".to_string())),
             ),
         ]));
 
@@ -1139,15 +1139,15 @@ mod tests {
 
     #[test]
     fn test_format_collapsed_preview_nested_object() {
-        use crate::document::node::{JsonNode, JsonValue};
+        use crate::document::node::{YamlNode, YamlValue};
 
-        let obj = JsonNode::new(JsonValue::Object(vec![
-            ("id".to_string(), JsonNode::new(JsonValue::Number(1.0))),
+        let obj = YamlNode::new(YamlValue::Object(vec![
+            ("id".to_string(), YamlNode::new(YamlValue::Number(1.0))),
             (
                 "user".to_string(),
-                JsonNode::new(JsonValue::Object(vec![(
+                YamlNode::new(YamlValue::Object(vec![(
                     "name".to_string(),
-                    JsonNode::new(JsonValue::String("Alice".to_string())),
+                    YamlNode::new(YamlValue::String("Alice".to_string())),
                 )])),
             ),
         ]));
@@ -1158,12 +1158,12 @@ mod tests {
 
     #[test]
     fn test_format_collapsed_preview_array() {
-        use crate::document::node::{JsonNode, JsonValue};
+        use crate::document::node::{YamlNode, YamlValue};
 
-        let arr = JsonNode::new(JsonValue::Array(vec![
-            JsonNode::new(JsonValue::Number(1.0)),
-            JsonNode::new(JsonValue::Number(2.0)),
-            JsonNode::new(JsonValue::Number(3.0)),
+        let arr = YamlNode::new(YamlValue::Array(vec![
+            YamlNode::new(YamlValue::Number(1.0)),
+            YamlNode::new(YamlValue::Number(2.0)),
+            YamlNode::new(YamlValue::Number(3.0)),
         ]));
 
         let preview = format_collapsed_preview(&arr, 100);
@@ -1172,21 +1172,21 @@ mod tests {
 
     #[test]
     fn test_format_collapsed_preview_truncation() {
-        use crate::document::node::{JsonNode, JsonValue};
+        use crate::document::node::{YamlNode, YamlValue};
 
-        let obj = JsonNode::new(JsonValue::Object(vec![
-            ("id".to_string(), JsonNode::new(JsonValue::Number(1.0))),
+        let obj = YamlNode::new(YamlValue::Object(vec![
+            ("id".to_string(), YamlNode::new(YamlValue::Number(1.0))),
             (
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Alice".to_string())),
+                YamlNode::new(YamlValue::String("Alice".to_string())),
             ),
             (
                 "email".to_string(),
-                JsonNode::new(JsonValue::String("alice@example.com".to_string())),
+                YamlNode::new(YamlValue::String("alice@example.com".to_string())),
             ),
             (
                 "active".to_string(),
-                JsonNode::new(JsonValue::Boolean(true)),
+                YamlNode::new(YamlValue::Boolean(true)),
             ),
         ]));
 
@@ -1197,17 +1197,17 @@ mod tests {
 
     #[test]
     fn test_format_collapsed_preview_utf8_truncation() {
-        use crate::document::node::{JsonNode, JsonValue};
+        use crate::document::node::{YamlNode, YamlValue};
 
         // Test with multi-byte UTF-8 characters (emoji, Chinese, etc.)
-        let obj = JsonNode::new(JsonValue::Object(vec![
+        let obj = YamlNode::new(YamlValue::Object(vec![
             (
                 "emoji".to_string(),
-                JsonNode::new(JsonValue::String("🌟✨🎉🎊🎈".to_string())),
+                YamlNode::new(YamlValue::String("🌟✨🎉🎊🎈".to_string())),
             ),
             (
                 "chinese".to_string(),
-                JsonNode::new(JsonValue::String(
+                YamlNode::new(YamlValue::String(
                     "你好世界这是一个很长的字符串".to_string(),
                 )),
             ),
@@ -1218,9 +1218,9 @@ mod tests {
         assert!(preview.contains("..."));
 
         // Test array with UTF-8 strings
-        let arr = JsonNode::new(JsonValue::Array(vec![
-            JsonNode::new(JsonValue::String("🌟✨🎉🎊🎈🎁🎀🎂".to_string())),
-            JsonNode::new(JsonValue::String(
+        let arr = YamlNode::new(YamlValue::Array(vec![
+            YamlNode::new(YamlValue::String("🌟✨🎉🎊🎈🎁🎀🎂".to_string())),
+            YamlNode::new(YamlValue::String(
                 "你好世界这是一个很长的字符串".to_string(),
             )),
         ]));
@@ -1231,22 +1231,22 @@ mod tests {
     }
 
     #[test]
-    fn test_render_jsonl_root() {
-        use crate::document::node::{JsonNode, JsonValue};
-        use crate::document::tree::JsonTree;
+    fn test_render_multidoc_root() {
+        use crate::document::node::{YamlNode, YamlValue};
+        use crate::document::tree::YamlTree;
 
         let lines = vec![
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "id".to_string(),
-                JsonNode::new(JsonValue::Number(1.0)),
+                YamlNode::new(YamlValue::Number(1.0)),
             )])),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "id".to_string(),
-                JsonNode::new(JsonValue::Number(2.0)),
+                YamlNode::new(YamlValue::Number(2.0)),
             )])),
         ];
 
-        let tree = JsonTree::new(JsonNode::new(JsonValue::JsonlRoot(lines)));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::MultiDoc(lines)));
         let mut state = TreeViewState::new();
         state.rebuild(&tree);
 
@@ -1260,18 +1260,18 @@ mod tests {
 
     #[test]
     fn test_expand_jsonl_line() {
-        use crate::document::node::{JsonNode, JsonValue};
-        use crate::document::tree::JsonTree;
+        use crate::document::node::{YamlNode, YamlValue};
+        use crate::document::tree::YamlTree;
 
-        let lines = vec![JsonNode::new(JsonValue::Object(vec![
-            ("id".to_string(), JsonNode::new(JsonValue::Number(1.0))),
+        let lines = vec![YamlNode::new(YamlValue::Object(vec![
+            ("id".to_string(), YamlNode::new(YamlValue::Number(1.0))),
             (
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Alice".to_string())),
+                YamlNode::new(YamlValue::String("Alice".to_string())),
             ),
         ]))];
 
-        let tree = JsonTree::new(JsonNode::new(JsonValue::JsonlRoot(lines)));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::MultiDoc(lines)));
         let mut state = TreeViewState::new();
         state.rebuild(&tree);
 
@@ -1284,32 +1284,32 @@ mod tests {
 
         // Should now show 3 lines: object + 2 fields
         assert!(state.lines().len() > 1);
-        assert_eq!(state.lines()[0].depth, 0); // The JSONL line itself
+        assert_eq!(state.lines()[0].depth, 0); // The multi-document YAML line itself
         assert!(state.lines()[0].expanded);
     }
 
     #[test]
     fn test_update_paths_after_deletion() {
-        use crate::document::node::{JsonNode, JsonValue};
-        use crate::document::tree::JsonTree;
+        use crate::document::node::{YamlNode, YamlValue};
+        use crate::document::tree::YamlTree;
 
         // Create array with 4 objects
-        let _tree = JsonTree::new(JsonNode::new(JsonValue::Array(vec![
-            JsonNode::new(JsonValue::Object(vec![(
+        let _tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![
+            YamlNode::new(YamlValue::Object(vec![(
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Alice".to_string())),
+                YamlNode::new(YamlValue::String("Alice".to_string())),
             )])),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Bob".to_string())),
+                YamlNode::new(YamlValue::String("Bob".to_string())),
             )])),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Charlie".to_string())),
+                YamlNode::new(YamlValue::String("Charlie".to_string())),
             )])),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Dave".to_string())),
+                YamlNode::new(YamlValue::String("Dave".to_string())),
             )])),
         ])));
 
@@ -1339,30 +1339,30 @@ mod tests {
 
     #[test]
     fn test_deletion_preserves_sibling_expansion() {
-        use crate::document::node::{JsonNode, JsonValue};
-        use crate::document::tree::JsonTree;
+        use crate::document::node::{YamlNode, YamlValue};
+        use crate::document::tree::YamlTree;
 
         // Create nested structure where we'll delete one object but others should stay expanded
-        let mut tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
+        let mut tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
             (
                 "item1".to_string(),
-                JsonNode::new(JsonValue::Object(vec![(
+                YamlNode::new(YamlValue::Object(vec![(
                     "nested".to_string(),
-                    JsonNode::new(JsonValue::Number(1.0)),
+                    YamlNode::new(YamlValue::Number(1.0)),
                 )])),
             ),
             (
                 "item2".to_string(),
-                JsonNode::new(JsonValue::Object(vec![(
+                YamlNode::new(YamlValue::Object(vec![(
                     "nested".to_string(),
-                    JsonNode::new(JsonValue::Number(2.0)),
+                    YamlNode::new(YamlValue::Number(2.0)),
                 )])),
             ),
             (
                 "item3".to_string(),
-                JsonNode::new(JsonValue::Object(vec![(
+                YamlNode::new(YamlValue::Object(vec![(
                     "nested".to_string(),
-                    JsonNode::new(JsonValue::Number(3.0)),
+                    YamlNode::new(YamlValue::Number(3.0)),
                 )])),
             ),
         ])));

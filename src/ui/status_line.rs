@@ -32,17 +32,17 @@ use ratatui::{
 /// ```no_run
 /// use ratatui::Frame;
 /// use ratatui::layout::Rect;
-/// use jsonquill::editor::state::EditorState;
-/// use jsonquill::theme;
+/// use yamlquill::editor::state::EditorState;
+/// use yamlquill::theme;
 ///
 /// # fn example(f: &mut Frame, area: Rect) {
-/// let state = EditorState::new_with_default_theme(jsonquill::document::tree::JsonTree::new(
-///     jsonquill::document::node::JsonNode::new(
-///         jsonquill::document::node::JsonValue::Null
+/// let state = EditorState::new_with_default_theme(yamlquill::document::tree::YamlTree::new(
+///     yamlquill::document::node::YamlNode::new(
+///         yamlquill::document::node::YamlValue::Null
 ///     )
 /// ));
 /// let theme = theme::get_builtin_theme("default-dark").unwrap();
-/// jsonquill::ui::status_line::render_status_line(f, area, &state, &theme.colors);
+/// yamlquill::ui::status_line::render_status_line(f, area, &state, &theme.colors);
 /// # }
 /// ```
 pub fn render_status_line(f: &mut Frame, area: Rect, state: &EditorState, colors: &ThemeColors) {
@@ -85,8 +85,8 @@ pub fn render_status_line(f: &mut Frame, area: Rect, state: &EditorState, colors
                     total
                 )
             }
-            Some(SearchType::JsonPath(query)) => {
-                format!(" [JSONPath: {}] Match {}/{}", query, current, total)
+            Some(SearchType::YamlPath(query)) => {
+                format!(" [YAMLPath: {}] Match {}/{}", query, current, total)
             }
             None => format!(" Match {}/{}", current, total),
         }
@@ -156,8 +156,8 @@ pub fn render_status_line(f: &mut Frame, area: Rect, state: &EditorState, colors
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{JsonNode, JsonValue};
-    use crate::document::tree::JsonTree;
+    use crate::document::node::{YamlNode, YamlValue};
+    use crate::document::tree::YamlTree;
     use crate::editor::state::EditorState;
     use crate::theme;
     use ratatui::backend::TestBackend;
@@ -167,7 +167,7 @@ mod tests {
     fn test_status_line_no_filename() {
         let backend = TestBackend::new(80, 3);
         let mut terminal = Terminal::new(backend).unwrap();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let state = EditorState::new_with_default_theme(tree);
         let theme = theme::get_builtin_theme("default-dark").unwrap();
 
@@ -194,7 +194,7 @@ mod tests {
     fn test_status_line_with_filename() {
         let backend = TestBackend::new(80, 3);
         let mut terminal = Terminal::new(backend).unwrap();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());
         let theme = theme::get_builtin_theme("default-dark").unwrap();
@@ -221,7 +221,7 @@ mod tests {
     fn test_status_line_dirty_indicator() {
         let backend = TestBackend::new(80, 3);
         let mut terminal = Terminal::new(backend).unwrap();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
         state.mark_dirty();
         let theme = theme::get_builtin_theme("default-dark").unwrap();
@@ -248,7 +248,7 @@ mod tests {
     fn test_status_line_clean_file() {
         let backend = TestBackend::new(80, 3);
         let mut terminal = Terminal::new(backend).unwrap();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("clean.json".to_string());
         // Don't mark as dirty
@@ -276,7 +276,7 @@ mod tests {
     fn test_status_line_different_modes() {
         let backend = TestBackend::new(80, 3);
         let mut terminal = Terminal::new(backend).unwrap();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let theme = theme::get_builtin_theme("default-dark").unwrap();
 
         // Test NORMAL mode
@@ -304,12 +304,12 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create tree: {"users": [{"name": "Alice"}]}
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "users".to_string(),
-            JsonNode::new(JsonValue::Array(vec![JsonNode::new(JsonValue::Object(
+            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
                 vec![(
                     "name".to_string(),
-                    JsonNode::new(JsonValue::String("Alice".to_string())),
+                    YamlNode::new(YamlValue::String("Alice".to_string())),
                 )],
             ))])),
         )])));
@@ -317,7 +317,7 @@ mod tests {
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());
 
-        // Execute JSONPath search
+        // Execute YAMLPath search
         state.execute_jsonpath_search("$.users[0].name");
 
         let theme = theme::get_builtin_theme("default-dark").unwrap();
@@ -334,8 +334,8 @@ mod tests {
 
         let text: String = content.iter().take(120).map(|c| c.symbol()).collect();
         assert!(
-            text.contains("JSONPath"),
-            "Status line should show JSONPath search type: {}",
+            text.contains("YAMLPath"),
+            "Status line should show YAMLPath search type: {}",
             text
         );
         assert!(
@@ -351,12 +351,12 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create tree: {"users": [{"name": "Alice"}]}
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "users".to_string(),
-            JsonNode::new(JsonValue::Array(vec![JsonNode::new(JsonValue::Object(
+            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
                 vec![(
                     "name".to_string(),
-                    JsonNode::new(JsonValue::String("Alice".to_string())),
+                    YamlNode::new(YamlValue::String("Alice".to_string())),
                 )],
             ))])),
         )])));
@@ -395,7 +395,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create empty object - cursor will be at root since there are no children
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
 
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());
@@ -438,11 +438,11 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create tree: {"users": {"name": "Alice"}}
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "users".to_string(),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "name".to_string(),
-                JsonNode::new(JsonValue::String("Alice".to_string())),
+                YamlNode::new(YamlValue::String("Alice".to_string())),
             )])),
         )])));
 
@@ -478,12 +478,12 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create tree: {"users": [{"name": "Alice"}]}
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "users".to_string(),
-            JsonNode::new(JsonValue::Array(vec![JsonNode::new(JsonValue::Object(
+            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
                 vec![(
                     "name".to_string(),
-                    JsonNode::new(JsonValue::String("Alice".to_string())),
+                    YamlNode::new(YamlValue::String("Alice".to_string())),
                 )],
             ))])),
         )])));

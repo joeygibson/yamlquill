@@ -1,6 +1,6 @@
-//! Tree-based navigation for JSON documents.
+//! Tree-based navigation for YAML documents.
 //!
-//! This module provides the `JsonTree` type for navigating JSON structures using
+//! This module provides the `YamlTree` type for navigating YAML structures using
 //! path-based indexing. It enables traversal of nested objects and arrays by
 //! specifying a sequence of indices that represent the path from the root to a
 //! target node.
@@ -8,13 +8,13 @@
 //! # Example
 //!
 //! ```
-//! use jsonquill::document::tree::JsonTree;
-//! use jsonquill::document::node::{JsonNode, JsonValue};
+//! use yamlquill::document::tree::YamlTree;
+//! use yamlquill::document::node::{YamlNode, YamlValue};
 //!
 //! // Create a simple tree
-//! let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-//!     ("name".to_string(), JsonNode::new(JsonValue::String("Alice".to_string()))),
-//!     ("age".to_string(), JsonNode::new(JsonValue::Number(30.0))),
+//! let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+//!     ("name".to_string(), YamlNode::new(YamlValue::String("Alice".to_string()))),
+//!     ("age".to_string(), YamlNode::new(YamlValue::Number(30.0))),
 //! ])));
 //!
 //! // Access the root
@@ -23,57 +23,57 @@
 //! // Navigate to first field
 //! let path = vec![0];
 //! let child = tree.get_node(&path).unwrap();
-//! if let JsonValue::String(s) = child.value() {
+//! if let YamlValue::String(s) = child.value() {
 //!     assert_eq!(s, "Alice");
 //! }
 //! ```
 
-use super::node::{JsonNode, JsonValue};
+use super::node::{YamlNode, YamlValue};
 
-/// A complete JSON document tree.
+/// A complete YAML document tree.
 ///
-/// `JsonTree` represents a parsed JSON document with a root node and optional
+/// `YamlTree` represents a parsed YAML document with a root node and optional
 /// original source text for format preservation.
 #[derive(Debug, Clone, PartialEq)]
-pub struct JsonTree {
-    root: JsonNode,
-    /// The original JSON string (preserved for unmodified nodes)
+pub struct YamlTree {
+    root: YamlNode,
+    /// The original YAML string (preserved for unmodified nodes)
     original_source: Option<String>,
 }
 
-impl JsonTree {
-    /// Creates a new JSON tree with the given root node.
+impl YamlTree {
+    /// Creates a new YAML tree with the given root node.
     ///
     /// The tree has no original source, so format preservation is not available.
-    /// New nodes created via `JsonNode::new()` are marked as modified by default.
+    /// New nodes created via `YamlNode::new()` are marked as modified by default.
     ///
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::tree::JsonTree;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::tree::YamlTree;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let root = JsonNode::new(JsonValue::Null);
-    /// let tree = JsonTree::new(root);
+    /// let root = YamlNode::new(YamlValue::Null);
+    /// let tree = YamlTree::new(root);
     /// ```
-    pub fn new(root: JsonNode) -> Self {
+    pub fn new(root: YamlNode) -> Self {
         Self {
             root,
             original_source: None,
         }
     }
 
-    /// Creates a new JSON tree with the given root node and original source.
+    /// Creates a new YAML tree with the given root node and original source.
     ///
     /// The original source enables format preservation for unmodified nodes.
-    pub fn with_source(root: JsonNode, original_source: Option<String>) -> Self {
+    pub fn with_source(root: YamlNode, original_source: Option<String>) -> Self {
         Self {
             root,
             original_source,
         }
     }
 
-    /// Returns a reference to the original JSON source, if available.
+    /// Returns a reference to the original YAML source, if available.
     pub fn original_source(&self) -> Option<&str> {
         self.original_source.as_deref()
     }
@@ -83,15 +83,15 @@ impl JsonTree {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::tree::JsonTree;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::tree::YamlTree;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let root = JsonNode::new(JsonValue::Boolean(true));
-    /// let tree = JsonTree::new(root);
+    /// let root = YamlNode::new(YamlValue::Boolean(true));
+    /// let tree = YamlTree::new(root);
     ///
-    /// assert!(matches!(tree.root().value(), JsonValue::Boolean(true)));
+    /// assert!(matches!(tree.root().value(), YamlValue::Boolean(true)));
     /// ```
-    pub fn root(&self) -> &JsonNode {
+    pub fn root(&self) -> &YamlNode {
         &self.root
     }
 
@@ -100,15 +100,15 @@ impl JsonTree {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::tree::JsonTree;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::tree::YamlTree;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let root = JsonNode::new(JsonValue::Null);
-    /// let mut tree = JsonTree::new(root);
+    /// let root = YamlNode::new(YamlValue::Null);
+    /// let mut tree = YamlTree::new(root);
     ///
-    /// *tree.root_mut().value_mut() = JsonValue::Boolean(false);
+    /// *tree.root_mut().value_mut() = YamlValue::Boolean(false);
     /// ```
-    pub fn root_mut(&mut self) -> &mut JsonNode {
+    pub fn root_mut(&mut self) -> &mut YamlNode {
         &mut self.root
     }
 
@@ -126,34 +126,34 @@ impl JsonTree {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::tree::JsonTree;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::tree::YamlTree;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("items".to_string(), JsonNode::new(JsonValue::Array(vec![
-    ///         JsonNode::new(JsonValue::Number(1.0)),
-    ///         JsonNode::new(JsonValue::Number(2.0)),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("items".to_string(), YamlNode::new(YamlValue::Array(vec![
+    ///         YamlNode::new(YamlValue::Number(1.0)),
+    ///         YamlNode::new(YamlValue::Number(2.0)),
     ///     ]))),
     /// ])));
     ///
     /// // Navigate to items[1]
     /// let path = vec![0, 1]; // First object field, second array element
     /// let node = tree.get_node(&path).unwrap();
-    /// assert!(matches!(node.value(), JsonValue::Number(2.0)));
+    /// assert!(matches!(node.value(), YamlValue::Number(2.0)));
     ///
     /// // Invalid path
     /// let invalid_path = vec![0, 99];
     /// assert!(tree.get_node(&invalid_path).is_none());
     /// ```
-    pub fn get_node(&self, path: &[usize]) -> Option<&JsonNode> {
+    pub fn get_node(&self, path: &[usize]) -> Option<&YamlNode> {
         let mut current = &self.root;
 
         for &index in path {
             match current.value() {
-                JsonValue::Object(entries) => {
+                YamlValue::Object(entries) => {
                     current = &entries.get(index)?.1;
                 }
-                JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+                YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                     current = elements.get(index)?;
                 }
                 _ => return None,
@@ -176,34 +176,34 @@ impl JsonTree {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::tree::JsonTree;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::document::tree::YamlTree;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     ///
-    /// let mut tree = JsonTree::new(JsonNode::new(JsonValue::Array(vec![
-    ///     JsonNode::new(JsonValue::String("old".to_string())),
+    /// let mut tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![
+    ///     YamlNode::new(YamlValue::String("old".to_string())),
     /// ])));
     ///
     /// // Modify first array element
     /// let path = vec![0];
     /// if let Some(node) = tree.get_node_mut(&path) {
-    ///     *node.value_mut() = JsonValue::String("new".to_string());
+    ///     *node.value_mut() = YamlValue::String("new".to_string());
     /// }
     ///
     /// // Verify the change
     /// let node = tree.get_node(&path).unwrap();
-    /// if let JsonValue::String(s) = node.value() {
+    /// if let YamlValue::String(s) = node.value() {
     ///     assert_eq!(s, "new");
     /// }
     /// ```
-    pub fn get_node_mut(&mut self, path: &[usize]) -> Option<&mut JsonNode> {
+    pub fn get_node_mut(&mut self, path: &[usize]) -> Option<&mut YamlNode> {
         let mut current = &mut self.root;
 
         for &index in path {
             match current.value_mut() {
-                JsonValue::Object(entries) => {
+                YamlValue::Object(entries) => {
                     current = &mut entries.get_mut(index)?.1;
                 }
-                JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+                YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                     current = elements.get_mut(index)?;
                 }
                 _ => return None,
@@ -233,7 +233,7 @@ impl JsonTree {
 
         // Delete from parent based on its type
         match parent.value_mut() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 if index >= entries.len() {
                     return Err(anyhow!(
                         "Index {} out of bounds for object with {} entries",
@@ -243,7 +243,7 @@ impl JsonTree {
                 }
                 entries.remove(index);
             }
-            JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+            YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 if index >= elements.len() {
                     return Err(anyhow!(
                         "Index {} out of bounds for array with {} elements",
@@ -267,7 +267,7 @@ impl JsonTree {
         &mut self,
         path: &[usize],
         key: String,
-        node: JsonNode,
+        node: YamlNode,
     ) -> anyhow::Result<()> {
         use anyhow::anyhow;
 
@@ -293,7 +293,7 @@ impl JsonTree {
 
         // Insert into object
         match target.value_mut() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 if index > entries.len() {
                     return Err(anyhow!(
                         "Index {} out of bounds for object with {} entries",
@@ -312,7 +312,7 @@ impl JsonTree {
     }
 
     /// Inserts a node into an array at the specified path and index.
-    pub fn insert_node_in_array(&mut self, path: &[usize], node: JsonNode) -> anyhow::Result<()> {
+    pub fn insert_node_in_array(&mut self, path: &[usize], node: YamlNode) -> anyhow::Result<()> {
         use anyhow::anyhow;
 
         // Get parent path (all but last index)
@@ -337,7 +337,7 @@ impl JsonTree {
 
         // Insert into array
         match target.value_mut() {
-            JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+            YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 if index > elements.len() {
                     return Err(anyhow!(
                         "Index {} out of bounds for array with {} elements",
@@ -362,16 +362,16 @@ mod tests {
 
     #[test]
     fn test_tree_with_original_source() {
-        let root = JsonNode::new(JsonValue::String("test".to_string()));
-        let tree = JsonTree::with_source(root.clone(), Some("\"test\"".to_string()));
+        let root = YamlNode::new(YamlValue::String("test".to_string()));
+        let tree = YamlTree::with_source(root.clone(), Some("\"test\"".to_string()));
 
         assert_eq!(tree.original_source(), Some("\"test\""));
     }
 
     #[test]
     fn test_tree_without_original_source() {
-        let root = JsonNode::new(JsonValue::Null);
-        let tree = JsonTree::new(root);
+        let root = YamlNode::new(YamlValue::Null);
+        let tree = YamlTree::new(root);
 
         assert_eq!(tree.original_source(), None);
     }

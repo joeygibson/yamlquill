@@ -1,13 +1,13 @@
-//! Theme system for jsonquill.
+//! Theme system for yamlquill.
 //!
-//! This module provides the theme infrastructure for jsonquill, including:
+//! This module provides the theme infrastructure for yamlquill, including:
 //! - Color definitions ([`colors`] module)
 //! - Theme data structure ([`Theme`])
 //! - Built-in theme access ([`get_builtin_theme`])
 //!
 //! # Built-in Themes
 //!
-//! jsonquill includes multiple built-in themes:
+//! yamlquill includes multiple built-in themes:
 //! - `"default-dark"`: A dark theme optimized for low-light environments
 //! - `"default-light"`: A light theme for well-lit environments
 //! - `"gruvbox-dark"`: Retro groove color scheme with warm, earthy tones
@@ -20,7 +20,7 @@
 //! # Examples
 //!
 //! ```
-//! use jsonquill::theme::get_builtin_theme;
+//! use yamlquill::theme::get_builtin_theme;
 //!
 //! // Load the default dark theme
 //! let theme = get_builtin_theme("default-dark").unwrap();
@@ -34,7 +34,7 @@ pub mod colors;
 
 use colors::ThemeColors;
 
-/// A color theme for the jsonquill terminal UI.
+/// A color theme for the yamlquill terminal UI.
 ///
 /// Each theme has a name and a set of colors defined by [`ThemeColors`].
 /// Themes can be loaded from the built-in set using [`get_builtin_theme`].
@@ -42,7 +42,7 @@ use colors::ThemeColors;
 /// # Examples
 ///
 /// ```
-/// use jsonquill::theme::{Theme, get_builtin_theme};
+/// use yamlquill::theme::{Theme, get_builtin_theme};
 ///
 /// let theme = get_builtin_theme("default-dark").unwrap();
 /// assert_eq!(theme.name, "default-dark");
@@ -77,7 +77,7 @@ pub struct Theme {
 /// # Examples
 ///
 /// ```
-/// use jsonquill::theme::get_builtin_theme;
+/// use yamlquill::theme::get_builtin_theme;
 ///
 /// // Get a valid theme
 /// let dark = get_builtin_theme("default-dark");
@@ -162,7 +162,7 @@ pub fn get_builtin_theme(name: &str) -> Option<Theme> {
 /// # Examples
 ///
 /// ```
-/// use jsonquill::theme::list_builtin_themes;
+/// use yamlquill::theme::list_builtin_themes;
 ///
 /// let themes = list_builtin_themes();
 /// assert!(themes.contains(&"default-dark".to_string()));

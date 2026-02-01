@@ -1,7 +1,7 @@
 //! Editor mode management for modal editing.
 //!
 //! This module provides the `EditorMode` enum that represents the current editing
-//! mode in jsonquill. Following vim-style modal editing, the editor can be in one
+//! mode in yamlquill. Following vim-style modal editing, the editor can be in one
 //! of three modes, each with different keybindings and behaviors.
 //!
 //! # Modes
@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```
-//! use jsonquill::editor::mode::EditorMode;
+//! use yamlquill::editor::mode::EditorMode;
 //!
 //! // Editor starts in Normal mode by default
 //! let mode = EditorMode::default();
@@ -29,7 +29,7 @@ use std::fmt;
 
 /// Represents the current editing mode of the editor.
 ///
-/// jsonquill follows a vim-style modal editing paradigm where the behavior of
+/// yamlquill follows a vim-style modal editing paradigm where the behavior of
 /// keystrokes depends on the current mode. The mode is typically displayed
 /// in the status bar using the `Display` implementation.
 ///
@@ -45,7 +45,7 @@ use std::fmt;
 /// # Examples
 ///
 /// ```
-/// use jsonquill::editor::mode::EditorMode;
+/// use yamlquill::editor::mode::EditorMode;
 ///
 /// let mode = EditorMode::Normal;
 /// assert_eq!(format!("{}", mode), "NORMAL");
@@ -73,7 +73,7 @@ impl fmt::Display for EditorMode {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::mode::EditorMode;
+    /// use yamlquill::editor::mode::EditorMode;
     ///
     /// assert_eq!(format!("{}", EditorMode::Normal), "NORMAL");
     /// assert_eq!(format!("{}", EditorMode::Insert), "INSERT");
@@ -98,7 +98,7 @@ impl Default for EditorMode {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::mode::EditorMode;
+    /// use yamlquill::editor::mode::EditorMode;
     ///
     /// let mode = EditorMode::default();
     /// assert_eq!(mode, EditorMode::Normal);

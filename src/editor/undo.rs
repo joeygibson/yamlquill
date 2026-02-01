@@ -10,7 +10,7 @@
 //! - `UndoNode`: Tree node containing snapshot, parent, children, and metadata
 //! - `UndoTree`: Manages the tree structure and navigation
 
-use crate::document::tree::JsonTree;
+use crate::document::tree::YamlTree;
 use std::time::SystemTime;
 
 /// Snapshot of editor state at a specific point in time.
@@ -20,7 +20,7 @@ use std::time::SystemTime;
 /// - The cursor position within the tree
 #[derive(Debug, Clone)]
 pub struct EditorSnapshot {
-    pub tree: JsonTree,
+    pub tree: YamlTree,
     pub cursor_path: Vec<usize>,
 }
 
@@ -190,11 +190,11 @@ impl UndoTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{JsonNode, JsonValue};
+    use crate::document::node::{YamlNode, YamlValue};
 
     #[test]
     fn test_undo_node_creation() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let snapshot = EditorSnapshot {
             tree,
             cursor_path: vec![],
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_undo_tree_initialization() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let snapshot = EditorSnapshot {
             tree,
             cursor_path: vec![],
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_add_checkpoint() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let snapshot1 = EditorSnapshot {
             tree: tree.clone(),
             cursor_path: vec![],
@@ -232,7 +232,7 @@ mod tests {
 
         let mut undo_tree = UndoTree::new(snapshot1, 50);
 
-        let tree2 = JsonTree::new(JsonNode::new(JsonValue::Boolean(true)));
+        let tree2 = YamlTree::new(YamlNode::new(YamlValue::Boolean(true)));
         let snapshot2 = EditorSnapshot {
             tree: tree2,
             cursor_path: vec![0],
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_undo_basic() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let snapshot1 = EditorSnapshot {
             tree: tree.clone(),
             cursor_path: vec![],
@@ -259,7 +259,7 @@ mod tests {
         let mut undo_tree = UndoTree::new(snapshot1, 50);
 
         // Add a checkpoint
-        let tree2 = JsonTree::new(JsonNode::new(JsonValue::Boolean(true)));
+        let tree2 = YamlTree::new(YamlNode::new(YamlValue::Boolean(true)));
         let snapshot2 = EditorSnapshot {
             tree: tree2,
             cursor_path: vec![0],
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_undo_at_root_returns_none() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let snapshot = EditorSnapshot {
             tree,
             cursor_path: vec![],
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_redo_basic() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let snapshot1 = EditorSnapshot {
             tree: tree.clone(),
             cursor_path: vec![],
@@ -302,7 +302,7 @@ mod tests {
         let mut undo_tree = UndoTree::new(snapshot1, 50);
 
         // Add checkpoint then undo
-        let tree2 = JsonTree::new(JsonNode::new(JsonValue::Boolean(true)));
+        let tree2 = YamlTree::new(YamlNode::new(YamlValue::Boolean(true)));
         let snapshot2 = EditorSnapshot {
             tree: tree2,
             cursor_path: vec![0],
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_redo_with_no_children_returns_none() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let snapshot = EditorSnapshot {
             tree,
             cursor_path: vec![],
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_redo_chooses_newest_branch() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let snapshot1 = EditorSnapshot {
             tree: tree.clone(),
             cursor_path: vec![],
@@ -345,7 +345,7 @@ mod tests {
         let mut undo_tree = UndoTree::new(snapshot1, 50);
 
         // Create first branch
-        let tree2 = JsonTree::new(JsonNode::new(JsonValue::Boolean(true)));
+        let tree2 = YamlTree::new(YamlNode::new(YamlValue::Boolean(true)));
         let snapshot2 = EditorSnapshot {
             tree: tree2,
             cursor_path: vec![0],
@@ -354,7 +354,7 @@ mod tests {
 
         // Undo and create second branch (newer)
         undo_tree.undo();
-        let tree3 = JsonTree::new(JsonNode::new(JsonValue::Boolean(false)));
+        let tree3 = YamlTree::new(YamlNode::new(YamlValue::Boolean(false)));
         let snapshot3 = EditorSnapshot {
             tree: tree3,
             cursor_path: vec![1],

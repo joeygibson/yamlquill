@@ -38,7 +38,7 @@ impl InputHandler {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::input::InputHandler;
+    /// use yamlquill::input::InputHandler;
     ///
     /// let handler = InputHandler::new();
     /// ```
@@ -79,7 +79,7 @@ impl InputHandler {
     /// # Example
     ///
     /// ```no_run
-    /// use jsonquill::input::InputHandler;
+    /// use yamlquill::input::InputHandler;
     /// use std::time::Duration;
     ///
     /// let mut handler = InputHandler::new();
@@ -125,14 +125,14 @@ impl InputHandler {
     /// # Example
     ///
     /// ```no_run
-    /// use jsonquill::input::InputHandler;
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::tree::JsonTree;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
+    /// use yamlquill::input::InputHandler;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::tree::YamlTree;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
     /// use termion::event::{Event, Key};
     ///
     /// let mut handler = InputHandler::new();
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
     /// let event = Event::Key(Key::Char('q'));
     /// let should_quit = handler.handle_event(event, &mut state).unwrap();
@@ -1007,8 +1007,8 @@ impl InputHandler {
                         state.clear_search_results();
                         // Save the file
                         if let Some(filename) = state.filename() {
-                            use crate::file::saver::save_json_file;
-                            match save_json_file(filename, state.tree(), &state.to_config()) {
+                            use crate::file::saver::save_yaml_file;
+                            match save_yaml_file(filename, state.tree(), &state.to_config()) {
                                 Ok(_) => {
                                     state.clear_dirty();
                                     return Ok(true); // Quit after saving
@@ -1286,7 +1286,7 @@ impl InputHandler {
 
     fn execute_command(&self, command: &str, state: &mut EditorState) -> Result<bool> {
         use crate::editor::state::MessageLevel;
-        use crate::file::saver::save_json_file;
+        use crate::file::saver::save_yaml_file;
 
         let command = command.trim();
 
@@ -1527,8 +1527,8 @@ impl InputHandler {
             "e!" => {
                 // Reload from disk, discarding changes
                 if let Some(filename) = state.filename().map(|s| s.to_string()) {
-                    use crate::file::loader::load_json_file;
-                    match load_json_file(&filename) {
+                    use crate::file::loader::load_yaml_file;
+                    match load_yaml_file(&filename) {
                         Ok(tree) => {
                             state.reload_tree(tree);
                             state.set_message(
@@ -1565,8 +1565,8 @@ impl InputHandler {
                     return Ok(false);
                 }
 
-                use crate::file::loader::load_json_file;
-                match load_json_file(&filename) {
+                use crate::file::loader::load_yaml_file;
+                match load_yaml_file(&filename) {
                     Ok(tree) => {
                         state.reload_tree(tree);
                         state.set_filename(filename.clone());
@@ -1587,8 +1587,8 @@ impl InputHandler {
                     return Ok(false);
                 }
 
-                use crate::file::loader::load_json_file;
-                match load_json_file(&filename) {
+                use crate::file::loader::load_yaml_file;
+                match load_yaml_file(&filename) {
                     Ok(tree) => {
                         state.reload_tree(tree);
                         state.set_filename(filename.clone());
@@ -1640,7 +1640,7 @@ impl InputHandler {
                     return Ok(false);
                 }
 
-                match save_json_file(&filename, state.tree(), &state.to_config()) {
+                match save_yaml_file(&filename, state.tree(), &state.to_config()) {
                     Ok(_) => {
                         state.set_filename(filename.clone());
                         state.clear_dirty();
@@ -1654,7 +1654,7 @@ impl InputHandler {
             }
             "w" => {
                 if let Some(filename) = state.filename().map(|s| s.to_string()) {
-                    match save_json_file(&filename, state.tree(), &state.to_config()) {
+                    match save_yaml_file(&filename, state.tree(), &state.to_config()) {
                         Ok(_) => {
                             state.clear_dirty();
                             state.set_message(
@@ -1692,7 +1692,7 @@ impl InputHandler {
                     return Ok(false);
                 }
 
-                match save_json_file(&filename, state.tree(), &state.to_config()) {
+                match save_yaml_file(&filename, state.tree(), &state.to_config()) {
                     Ok(_) => {
                         state.set_filename(filename);
                         state.clear_dirty();
@@ -1706,7 +1706,7 @@ impl InputHandler {
             }
             "wq" | "x" => {
                 if let Some(filename) = state.filename().map(|s| s.to_string()) {
-                    match save_json_file(&filename, state.tree(), &state.to_config()) {
+                    match save_yaml_file(&filename, state.tree(), &state.to_config()) {
                         Ok(_) => {
                             state.clear_dirty();
                             Ok(true)
@@ -1748,8 +1748,8 @@ impl Default for InputHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{JsonNode, JsonValue};
-    use crate::document::tree::JsonTree;
+    use crate::document::node::{YamlNode, YamlValue};
+    use crate::document::tree::YamlTree;
     use crate::editor::mode::EditorMode;
     use termion::event::Key;
 
@@ -1762,7 +1762,7 @@ mod tests {
     #[test]
     fn test_quit_event() {
         let mut handler = InputHandler::new();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
         let event = Event::Key(Key::Char('q'));
 
@@ -1773,7 +1773,7 @@ mod tests {
     #[test]
     fn test_quit_blocked_when_dirty() {
         let mut handler = InputHandler::new();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
 
         // Mark the file as dirty
@@ -1796,7 +1796,7 @@ mod tests {
     #[test]
     fn test_enter_insert_mode() {
         let mut handler = InputHandler::new();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
         assert_eq!(*state.mode(), EditorMode::Normal);
 
@@ -1810,7 +1810,7 @@ mod tests {
     #[test]
     fn test_enter_command_mode() {
         let mut handler = InputHandler::new();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
 
         let event = Event::Key(Key::Char(':'));
@@ -1822,7 +1822,7 @@ mod tests {
     #[test]
     fn test_exit_mode() {
         let mut handler = InputHandler::new();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_mode(EditorMode::Insert);
 
@@ -1835,7 +1835,7 @@ mod tests {
     #[test]
     fn test_movement_keys_dont_quit() {
         let mut handler = InputHandler::new();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
 
         let event = Event::Key(Key::Char('j'));
@@ -1850,7 +1850,7 @@ mod tests {
         use tempfile::TempDir;
 
         let mut handler = InputHandler::new();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Number(42.0)));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Number(42.0)));
         let mut state = EditorState::new_with_default_theme(tree);
 
         // Create a temporary directory
@@ -1891,7 +1891,7 @@ mod tests {
         use tempfile::TempDir;
 
         let mut handler = InputHandler::new();
-        let tree = JsonTree::new(JsonNode::new(JsonValue::String("test".to_string())));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::String("test".to_string())));
         let mut state = EditorState::new_with_default_theme(tree);
 
         // Create a temporary directory

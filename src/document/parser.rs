@@ -1,26 +1,26 @@
-//! JSON parsing with metadata preservation.
+//! YAML parsing with metadata preservation.
 //!
-//! This module provides functionality to parse JSON strings into `JsonTree` structures
-//! while preserving formatting metadata. The parser converts standard JSON into our
+//! This module provides functionality to parse YAML strings into `YamlTree` structures
+//! while preserving formatting metadata. The parser converts standard YAML into our
 //! internal representation that tracks modification status and text spans for
 //! format-preserving edits.
 //!
 //! # Example
 //!
 //! ```
-//! use jsonquill::document::parser::parse_json;
+//! use yamlquill::document::parser::parse_yaml;
 //!
 //! let json = r#"{"name": "Alice", "age": 30}"#;
-//! let tree = parse_json(json).unwrap();
+//! let tree = parse_yaml(json).unwrap();
 //!
 //! // Navigate to the first field
 //! let name_node = tree.get_node(&[0]).unwrap();
 //! ```
 
-use super::node::{JsonNode, JsonValue, NodeMetadata, TextSpan};
-use super::tree::JsonTree;
+use super::node::{YamlNode, YamlValue, NodeMetadata, TextSpan};
+use super::tree::YamlTree;
 use anyhow::{Context, Result};
-use serde_json::Value as SerdeValue;
+use serde_yaml::Value as SerdeValue;
 
 /// Tracks byte positions while parsing JSON.
 struct SpanTracker<'a> {
@@ -160,36 +160,36 @@ impl<'a> SpanTracker<'a> {
     }
 }
 
-/// Parses a JSON string into a `JsonTree`.
+/// Parses a YAML string into a `YamlTree`.
 ///
-/// This function uses `serde_json` to parse the JSON string, then converts
-/// the result into our internal `JsonTree` structure with metadata tracking.
+/// This function uses `serde_json` to parse the YAML string, then converts
+/// the result into our internal `YamlTree` structure with metadata tracking.
 /// The root node will have its text_span populated by the span tracker for format-preserving edits.
 ///
 /// # Arguments
 ///
-/// * `json_str` - A string slice containing valid JSON
+/// * `yaml_str` - A string slice containing valid YAML
 ///
 /// # Returns
 ///
 /// Returns a `Result` containing:
-/// - `Ok(JsonTree)` if parsing succeeds
-/// - `Err(anyhow::Error)` if the JSON is malformed
+/// - `Ok(YamlTree)` if parsing succeeds
+/// - `Err(anyhow::Error)` if the YAML is malformed
 ///
 /// # Note on Number Precision
 ///
-/// JSON numbers are stored as `f64` internally. This means very large integers
+/// YAML numbers are stored as `f64` internally. This means very large integers
 /// (beyond 2^53 - 1) may lose precision during parsing. If exact integer precision
 /// is required for large numbers, consider using string representations instead
 ///
 /// # Example
 ///
 /// ```
-/// use jsonquill::document::parser::parse_json;
-/// use jsonquill::document::node::JsonValue;
+/// use yamlquill::document::parser::parse_yaml;
+/// use yamlquill::document::node::YamlValue;
 ///
 /// let json = r#"{"name": "Alice"}"#;
-/// let tree = parse_json(json).unwrap();
+/// let tree = parse_yaml(json).unwrap();
 ///
 /// // Root should be an object
 /// assert!(tree.root().value().is_object());
@@ -198,48 +198,48 @@ impl<'a> SpanTracker<'a> {
 /// # Errors
 ///
 /// This function will return an error if:
-/// - The input string is not valid JSON
-/// - The JSON contains syntax errors
+/// - The input string is not valid YAML
+/// - The YAML contains syntax errors
 ///
 /// # Examples
 ///
 /// Parsing a simple object:
 /// ```
-/// use jsonquill::document::parser::parse_json;
+/// use yamlquill::document::parser::parse_yaml;
 ///
 /// let json = r#"{"key": "value"}"#;
-/// let tree = parse_json(json).unwrap();
+/// let tree = parse_yaml(json).unwrap();
 /// ```
 ///
 /// Parsing an array:
 /// ```
-/// use jsonquill::document::parser::parse_json;
+/// use yamlquill::document::parser::parse_yaml;
 ///
 /// let json = r#"[1, 2, 3]"#;
-/// let tree = parse_json(json).unwrap();
+/// let tree = parse_yaml(json).unwrap();
 /// ```
 ///
 /// Handling errors:
 /// ```
-/// use jsonquill::document::parser::parse_json;
+/// use yamlquill::document::parser::parse_yaml;
 ///
-/// let invalid_json = r#"{"unclosed": "#;
-/// assert!(parse_json(invalid_json).is_err());
+/// let invalid_yaml = r#"{"unclosed": "#;
+/// assert!(parse_yaml(invalid_yaml).is_err());
 /// ```
-pub fn parse_json(json_str: &str) -> Result<JsonTree> {
-    let serde_value: SerdeValue = serde_json::from_str(json_str).context("Failed to parse JSON")?;
+pub fn parse_yaml(yaml_str: &str) -> Result<YamlTree> {
+    let serde_value: SerdeValue = serde_yaml::from_str(yaml_str).context("Failed to parse YAML")?;
 
-    let mut tracker = SpanTracker::new(json_str);
+    let mut tracker = SpanTracker::new(yaml_str);
     let root = convert_with_spans(&serde_value, &mut tracker);
 
-    Ok(JsonTree::with_source(root, Some(json_str.to_string())))
+    Ok(YamlTree::with_source(root, Some(yaml_str.to_string())))
 }
 
-/// Converts a serde_json::Value to JsonNode with span tracking.
-fn convert_with_spans(value: &SerdeValue, tracker: &mut SpanTracker) -> JsonNode {
+/// Converts a serde_yaml::Value to YamlNode with span tracking.
+fn convert_with_spans(value: &SerdeValue, tracker: &mut SpanTracker) -> YamlNode {
     let span = tracker.find_value_span(value);
 
-    let json_value = match value {
+    let yaml_value = match value {
         SerdeValue::Object(map) => {
             tracker.pos = span.start + 1; // Skip opening brace
             let entries = map
@@ -272,7 +272,7 @@ fn convert_with_spans(value: &SerdeValue, tracker: &mut SpanTracker) -> JsonNode
                 .collect();
             // CRITICAL: Restore position to end of container after processing children
             tracker.pos = span.end;
-            JsonValue::Object(entries)
+            YamlValue::Object(entries)
         }
         SerdeValue::Array(arr) => {
             tracker.pos = span.start + 1; // Skip opening bracket
@@ -293,16 +293,16 @@ fn convert_with_spans(value: &SerdeValue, tracker: &mut SpanTracker) -> JsonNode
                 .collect();
             // CRITICAL: Restore position to end of container after processing children
             tracker.pos = span.end;
-            JsonValue::Array(elements)
+            YamlValue::Array(elements)
         }
-        SerdeValue::String(s) => JsonValue::String(s.clone()),
-        SerdeValue::Number(n) => JsonValue::Number(n.as_f64().unwrap_or(0.0)),
-        SerdeValue::Bool(b) => JsonValue::Boolean(*b),
-        SerdeValue::Null => JsonValue::Null,
+        SerdeValue::String(s) => YamlValue::String(s.clone()),
+        SerdeValue::Number(n) => YamlValue::Number(n.as_f64().unwrap_or(0.0)),
+        SerdeValue::Bool(b) => YamlValue::Boolean(*b),
+        SerdeValue::Null => YamlValue::Null,
     };
 
-    JsonNode {
-        value: json_value,
+    YamlNode {
+        value: yaml_value,
         metadata: NodeMetadata {
             text_span: Some(span),
             modified: false,
@@ -310,7 +310,7 @@ fn convert_with_spans(value: &SerdeValue, tracker: &mut SpanTracker) -> JsonNode
     }
 }
 
-/// Converts a `serde_json::Value` into a `JsonNode`.
+/// Converts a `serde_yaml::Value` into a `YamlNode`.
 ///
 /// This is a recursive function that traverses the serde_json value tree
 /// and converts each value into our internal representation with metadata.
@@ -318,39 +318,39 @@ fn convert_with_spans(value: &SerdeValue, tracker: &mut SpanTracker) -> JsonNode
 ///
 /// # Arguments
 ///
-/// * `value` - The `serde_json::Value` to convert
+/// * `value` - The `serde_yaml::Value` to convert
 ///
 /// # Returns
 ///
-/// Returns a `JsonNode` with:
+/// Returns a `YamlNode` with:
 /// - The converted value
 /// - `modified: false` (since it's freshly parsed, not user-modified)
 /// - `text_span: None` (will be populated by span tracker later)
-pub fn parse_value(value: &SerdeValue) -> JsonNode {
+pub fn parse_value(value: &SerdeValue) -> YamlNode {
     convert_serde_value_impl(value)
 }
 
-fn convert_serde_value_impl(value: &SerdeValue) -> JsonNode {
-    let json_value = match value {
+fn convert_serde_value_impl(value: &SerdeValue) -> YamlNode {
+    let yaml_value = match value {
         SerdeValue::Object(map) => {
             let entries = map
                 .iter()
                 .map(|(k, v)| (k.clone(), convert_serde_value_impl(v)))
                 .collect();
-            JsonValue::Object(entries)
+            YamlValue::Object(entries)
         }
         SerdeValue::Array(arr) => {
             let elements = arr.iter().map(convert_serde_value_impl).collect();
-            JsonValue::Array(elements)
+            YamlValue::Array(elements)
         }
-        SerdeValue::String(s) => JsonValue::String(s.clone()),
-        SerdeValue::Number(n) => JsonValue::Number(n.as_f64().unwrap_or(0.0)),
-        SerdeValue::Bool(b) => JsonValue::Boolean(*b),
-        SerdeValue::Null => JsonValue::Null,
+        SerdeValue::String(s) => YamlValue::String(s.clone()),
+        SerdeValue::Number(n) => YamlValue::Number(n.as_f64().unwrap_or(0.0)),
+        SerdeValue::Bool(b) => YamlValue::Boolean(*b),
+        SerdeValue::Null => YamlValue::Null,
     };
 
-    JsonNode {
-        value: json_value,
+    YamlNode {
+        value: yaml_value,
         metadata: NodeMetadata {
             text_span: None,
             modified: false,
@@ -365,10 +365,10 @@ mod tests {
     #[test]
     fn test_parse_simple_string() {
         let json = r#""hello""#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::String(s) => assert_eq!(s, "hello"),
+            YamlValue::String(s) => assert_eq!(s, "hello"),
             _ => panic!("Expected string"),
         }
     }
@@ -376,10 +376,10 @@ mod tests {
     #[test]
     fn test_parse_number() {
         let json = "42.5";
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Number(n) => assert_eq!(*n, 42.5),
+            YamlValue::Number(n) => assert_eq!(*n, 42.5),
             _ => panic!("Expected number"),
         }
     }
@@ -387,10 +387,10 @@ mod tests {
     #[test]
     fn test_parse_boolean() {
         let json = "true";
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Boolean(b) => assert!(*b),
+            YamlValue::Boolean(b) => assert!(*b),
             _ => panic!("Expected boolean"),
         }
     }
@@ -398,18 +398,18 @@ mod tests {
     #[test]
     fn test_parse_null() {
         let json = "null";
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
-        assert!(matches!(tree.root().value(), JsonValue::Null));
+        assert!(matches!(tree.root().value(), YamlValue::Null));
     }
 
     #[test]
     fn test_parse_empty_object() {
         let json = "{}";
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Object(entries) => assert_eq!(entries.len(), 0),
+            YamlValue::Object(entries) => assert_eq!(entries.len(), 0),
             _ => panic!("Expected object"),
         }
     }
@@ -417,10 +417,10 @@ mod tests {
     #[test]
     fn test_parse_empty_array() {
         let json = "[]";
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Array(elements) => assert_eq!(elements.len(), 0),
+            YamlValue::Array(elements) => assert_eq!(elements.len(), 0),
             _ => panic!("Expected array"),
         }
     }
@@ -428,10 +428,10 @@ mod tests {
     #[test]
     fn test_parse_object_with_fields() {
         let json = r#"{"name": "Alice", "age": 30, "active": true}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 assert_eq!(entries.len(), 3);
                 assert_eq!(entries[0].0, "name");
                 assert_eq!(entries[1].0, "age");
@@ -439,17 +439,17 @@ mod tests {
 
                 // Check values
                 match entries[0].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "Alice"),
+                    YamlValue::String(s) => assert_eq!(s, "Alice"),
                     _ => panic!("Expected string"),
                 }
 
                 match entries[1].1.value() {
-                    JsonValue::Number(n) => assert_eq!(*n, 30.0),
+                    YamlValue::Number(n) => assert_eq!(*n, 30.0),
                     _ => panic!("Expected number"),
                 }
 
                 match entries[2].1.value() {
-                    JsonValue::Boolean(b) => assert!(*b),
+                    YamlValue::Boolean(b) => assert!(*b),
                     _ => panic!("Expected boolean"),
                 }
             }
@@ -460,16 +460,16 @@ mod tests {
     #[test]
     fn test_parse_array_with_elements() {
         let json = r#"[1, "two", true, null]"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Array(elements) => {
+            YamlValue::Array(elements) => {
                 assert_eq!(elements.len(), 4);
 
-                assert!(matches!(elements[0].value(), JsonValue::Number(n) if *n == 1.0));
-                assert!(matches!(elements[1].value(), JsonValue::String(s) if s == "two"));
-                assert!(matches!(elements[2].value(), JsonValue::Boolean(true)));
-                assert!(matches!(elements[3].value(), JsonValue::Null));
+                assert!(matches!(elements[0].value(), YamlValue::Number(n) if *n == 1.0));
+                assert!(matches!(elements[1].value(), YamlValue::String(s) if s == "two"));
+                assert!(matches!(elements[2].value(), YamlValue::Boolean(true)));
+                assert!(matches!(elements[3].value(), YamlValue::Null));
             }
             _ => panic!("Expected array"),
         }
@@ -478,12 +478,12 @@ mod tests {
     #[test]
     fn test_parse_nested_objects() {
         let json = r#"{"user": {"name": "Bob", "email": "bob@example.com"}}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         // Navigate to nested object
         let user_node = tree.get_node(&[0]).unwrap();
         match user_node.value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 assert_eq!(entries.len(), 2);
                 assert_eq!(entries[0].0, "name");
                 assert_eq!(entries[1].0, "email");
@@ -495,16 +495,16 @@ mod tests {
     #[test]
     fn test_parse_nested_arrays() {
         let json = r#"[[1, 2], [3, 4], [5, 6]]"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         // Check that root is an array
         match tree.root().value() {
-            JsonValue::Array(outer) => {
+            YamlValue::Array(outer) => {
                 assert_eq!(outer.len(), 3);
 
                 // Check first nested array
                 match outer[0].value() {
-                    JsonValue::Array(inner) => {
+                    YamlValue::Array(inner) => {
                         assert_eq!(inner.len(), 2);
                     }
                     _ => panic!("Expected nested array"),
@@ -527,17 +527,17 @@ mod tests {
             }
         }"#;
 
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 assert_eq!(entries.len(), 2);
                 assert_eq!(entries[0].0, "users");
                 assert_eq!(entries[1].0, "metadata");
 
                 // Check users array
                 match entries[0].1.value() {
-                    JsonValue::Array(users) => {
+                    YamlValue::Array(users) => {
                         assert_eq!(users.len(), 2);
                     }
                     _ => panic!("Expected array"),
@@ -545,7 +545,7 @@ mod tests {
 
                 // Check metadata object
                 match entries[1].1.value() {
-                    JsonValue::Object(meta) => {
+                    YamlValue::Object(meta) => {
                         assert_eq!(meta.len(), 2);
                     }
                     _ => panic!("Expected object"),
@@ -556,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_invalid_json() {
+    fn test_parse_invalid_yaml() {
         let invalid_cases = vec![
             r#"{"unclosed": "#,
             r#"{"key": }"#,
@@ -566,7 +566,7 @@ mod tests {
         ];
 
         for invalid in invalid_cases {
-            let result = parse_json(invalid);
+            let result = parse_yaml(invalid);
             assert!(result.is_err(), "Expected error for: {}", invalid);
         }
     }
@@ -574,7 +574,7 @@ mod tests {
     #[test]
     fn test_parse_initializes_metadata() {
         let json = r#"{"name": "Alice"}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         // Root node should have text span populated by span tracker
         assert!(tree.root().metadata.text_span.is_some());
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn test_parse_nodes_not_modified() {
         let json = r#"{"name": "Alice"}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         // Parsed nodes should not be marked as modified
         assert!(!tree.root().is_modified());
@@ -594,27 +594,27 @@ mod tests {
     #[test]
     fn test_parse_special_characters() {
         let json = r#"{"text": "Hello\nWorld", "emoji": "😀", "quote": "Say \"hi\""}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 assert_eq!(entries.len(), 3);
 
                 // Check newline
                 match entries[0].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "Hello\nWorld"),
+                    YamlValue::String(s) => assert_eq!(s, "Hello\nWorld"),
                     _ => panic!("Expected string"),
                 }
 
                 // Check emoji
                 match entries[1].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "😀"),
+                    YamlValue::String(s) => assert_eq!(s, "😀"),
                     _ => panic!("Expected string"),
                 }
 
                 // Check escaped quotes
                 match entries[2].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "Say \"hi\""),
+                    YamlValue::String(s) => assert_eq!(s, "Say \"hi\""),
                     _ => panic!("Expected string"),
                 }
             }
@@ -634,9 +634,9 @@ mod tests {
         ];
 
         for (json, expected) in test_cases {
-            let tree = parse_json(json).unwrap();
+            let tree = parse_yaml(json).unwrap();
             match tree.root().value() {
-                JsonValue::Number(n) => assert_eq!(*n, expected),
+                YamlValue::Number(n) => assert_eq!(*n, expected),
                 _ => panic!("Expected number for: {}", json),
             }
         }
@@ -645,14 +645,14 @@ mod tests {
     #[test]
     fn test_parse_deep_nesting() {
         let json = r#"{"a": {"b": {"c": {"d": {"e": "deep"}}}}}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         // Navigate deep into structure
         let path = vec![0, 0, 0, 0, 0];
         let deep_node = tree.get_node(&path).unwrap();
 
         match deep_node.value() {
-            JsonValue::String(s) => assert_eq!(s, "deep"),
+            YamlValue::String(s) => assert_eq!(s, "deep"),
             _ => panic!("Expected string at deep nesting"),
         }
     }
@@ -660,24 +660,24 @@ mod tests {
     #[test]
     fn test_parse_unicode_strings() {
         let json = r#"{"chinese": "你好", "arabic": "مرحبا", "russian": "привет"}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 assert_eq!(entries.len(), 3);
 
                 match entries[0].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "你好"),
+                    YamlValue::String(s) => assert_eq!(s, "你好"),
                     _ => panic!("Expected string"),
                 }
 
                 match entries[1].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "مرحبا"),
+                    YamlValue::String(s) => assert_eq!(s, "مرحبا"),
                     _ => panic!("Expected string"),
                 }
 
                 match entries[2].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "привет"),
+                    YamlValue::String(s) => assert_eq!(s, "привет"),
                     _ => panic!("Expected string"),
                 }
             }
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn test_parse_preserves_text_spans() {
         let json = r#"{"name": "Alice", "age": 30}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         // Root should have a span covering the entire input
         assert!(tree.root().metadata.text_span.is_some());
@@ -700,7 +700,7 @@ mod tests {
     #[test]
     fn test_parse_sets_modified_false_for_parsed_nodes() {
         let json = r#"{"key": "value"}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         // Parsed nodes should not be marked as modified
         assert!(!tree.root().is_modified());
@@ -709,7 +709,7 @@ mod tests {
     #[test]
     fn test_parse_stores_original_source() {
         let json = r#"[1, 2, 3]"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         assert_eq!(tree.original_source(), Some(json));
     }
@@ -717,21 +717,21 @@ mod tests {
     #[test]
     fn test_parse_unicode_escape_in_string() {
         let json = r#"{"emoji": "Hello\u0041World", "chinese": "\u4f60\u597d"}"#;
-        let tree = parse_json(json).unwrap();
+        let tree = parse_yaml(json).unwrap();
 
         match tree.root().value() {
-            JsonValue::Object(entries) => {
+            YamlValue::Object(entries) => {
                 assert_eq!(entries.len(), 2);
 
                 // Check Unicode escape sequence \u0041 (A)
                 match entries[0].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "HelloAWorld"),
+                    YamlValue::String(s) => assert_eq!(s, "HelloAWorld"),
                     _ => panic!("Expected string"),
                 }
 
                 // Check Unicode escape sequences for Chinese characters
                 match entries[1].1.value() {
-                    JsonValue::String(s) => assert_eq!(s, "你好"),
+                    YamlValue::String(s) => assert_eq!(s, "你好"),
                     _ => panic!("Expected string"),
                 }
             }

@@ -1,6 +1,6 @@
-//! JSONPath query parser and evaluator for structural JSON search.
+//! YAMLPath query parser and evaluator for structural JSON search.
 //!
-//! This module provides JSONPath query support, enabling users to search
+//! This module provides YAMLPath query support, enabling users to search
 //! JSON documents by structure rather than just text content.
 //!
 //! # Supported Syntax
@@ -28,7 +28,7 @@ pub mod error;
 pub mod evaluator;
 pub mod parser;
 
-pub use ast::{JsonPath, PathSegment};
-pub use error::JsonPathError;
+pub use ast::{YamlPath, PathSegment};
+pub use error::YamlPathError;
 pub use evaluator::Evaluator;
 pub use parser::Parser;

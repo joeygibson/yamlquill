@@ -18,13 +18,13 @@
 //! # Example
 //!
 //! ```
-//! use jsonquill::editor::state::EditorState;
-//! use jsonquill::editor::mode::EditorMode;
-//! use jsonquill::document::node::{JsonNode, JsonValue};
-//! use jsonquill::document::tree::JsonTree;
+//! use yamlquill::editor::state::EditorState;
+//! use yamlquill::editor::mode::EditorMode;
+//! use yamlquill::document::node::{YamlNode, YamlValue};
+//! use yamlquill::document::tree::YamlTree;
 //!
 //! // Create an editor state with an empty object
-//! let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![])));
+//! let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
 //! let mut state = EditorState::new_with_default_theme(tree);
 //!
 //! // Starts in Normal mode, not dirty
@@ -46,8 +46,8 @@ use super::marks::MarkSet;
 use super::mode::EditorMode;
 use super::registers::RegisterSet;
 use super::repeat::RepeatableCommand;
-use crate::document::node::{JsonNode, JsonValue};
-use crate::document::tree::JsonTree;
+use crate::document::node::{YamlNode, YamlValue};
+use crate::document::tree::YamlTree;
 use crate::ui::tree_view::TreeViewState;
 
 /// Type of active search.
@@ -56,7 +56,7 @@ pub enum SearchType {
     /// Text-based search (/ or ?)
     Text,
     /// JSONPath structural search (:path or :jp)
-    JsonPath(String), // Store the query string for display
+    YamlPath(String), // Store the query string for display
 }
 
 /// State for the interactive theme picker popup.
@@ -92,40 +92,40 @@ impl ThemePickerState {
     }
 }
 
-/// Parses a string into a JsonValue, detecting type automatically.
+/// Parses a string into a YamlValue, detecting type automatically.
 ///
 /// - "true"/"false" → Boolean
 /// - "null" → Null
 /// - Valid number → Number
 /// - Everything else → String
-fn parse_scalar_value(input: &str) -> JsonValue {
+fn parse_scalar_value(input: &str) -> YamlValue {
     let trimmed = input.trim();
 
     // Try boolean
     if trimmed == "true" {
-        return JsonValue::Boolean(true);
+        return YamlValue::Boolean(true);
     }
     if trimmed == "false" {
-        return JsonValue::Boolean(false);
+        return YamlValue::Boolean(false);
     }
 
     // Try null
     if trimmed == "null" {
-        return JsonValue::Null;
+        return YamlValue::Null;
     }
 
     // Try number
     if let Ok(num) = trimmed.parse::<f64>() {
-        return JsonValue::Number(num);
+        return YamlValue::Number(num);
     }
 
     // Default to string (use original input, not trimmed)
-    JsonValue::String(input.to_string())
+    YamlValue::String(input.to_string())
 }
 
 /// Test helper to expose private function
 #[doc(hidden)]
-pub fn parse_scalar_value_for_test(input: &str) -> JsonValue {
+pub fn parse_scalar_value_for_test(input: &str) -> YamlValue {
     parse_scalar_value(input)
 }
 
@@ -141,12 +141,12 @@ pub fn parse_scalar_value_for_test(input: &str) -> JsonValue {
 /// # Examples
 ///
 /// ```
-/// use jsonquill::editor::state::EditorState;
-/// use jsonquill::editor::mode::EditorMode;
-/// use jsonquill::document::node::{JsonNode, JsonValue};
-/// use jsonquill::document::tree::JsonTree;
+/// use yamlquill::editor::state::EditorState;
+/// use yamlquill::editor::mode::EditorMode;
+/// use yamlquill::document::node::{YamlNode, YamlValue};
+/// use yamlquill::document::tree::YamlTree;
 ///
-/// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+/// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
 /// let mut state = EditorState::new_with_default_theme(tree);
 ///
 /// // Check initial state
@@ -187,7 +187,7 @@ pub enum AddModeStage {
 }
 
 pub struct EditorState {
-    tree: JsonTree,
+    tree: YamlTree,
     mode: EditorMode,
     cursor: Cursor,
     dirty: bool,
@@ -202,7 +202,7 @@ pub struct EditorState {
     show_theme_picker: bool,
     theme_picker_state: Option<ThemePickerState>,
     // Old clipboard fields - TODO: remove after register migration
-    // clipboard: Option<JsonNode>,
+    // clipboard: Option<YamlNode>,
     // clipboard_key: Option<String>,
     registers: RegisterSet,
     pending_register: Option<char>,
@@ -229,7 +229,7 @@ pub struct EditorState {
     add_key_buffer: String,
     add_key_cursor: usize,
     add_insertion_point: Option<Vec<usize>>,
-    temp_container: Option<JsonNode>, // Temporary storage for container during add operation
+    temp_container: Option<YamlNode>, // Temporary storage for container during add operation
     is_renaming_key: bool,
     rename_original_key: Option<String>,
     // Tab-completion state
@@ -259,21 +259,21 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Array(vec![])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![])));
     /// let state = EditorState::new_with_default_theme(tree);
     ///
     /// assert!(!state.is_dirty());
     /// assert_eq!(state.filename(), None);
     /// ```
-    pub fn new(tree: JsonTree, initial_theme_name: String) -> Self {
+    pub fn new(tree: YamlTree, initial_theme_name: String) -> Self {
         let mut tree_view = TreeViewState::new();
         // Expand all nodes by default for regular JSON files
         // JSONL files start collapsed to show previews
-        if !matches!(tree.root().value(), JsonValue::JsonlRoot(_)) {
+        if !matches!(tree.root().value(), YamlValue::MultiDoc(_)) {
             tree_view.expand_all(&tree);
         }
         tree_view.rebuild(&tree);
@@ -355,7 +355,7 @@ impl EditorState {
     ///
     /// This is a convenience method for tests that don't care about the theme.
     #[doc(hidden)]
-    pub fn new_with_default_theme(tree: JsonTree) -> Self {
+    pub fn new_with_default_theme(tree: YamlTree) -> Self {
         Self::new(tree, "default-dark".to_string())
     }
 
@@ -364,17 +364,17 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
     ///
     /// let tree_ref = state.tree();
     /// // Use tree_ref for read-only operations
     /// ```
-    pub fn tree(&self) -> &JsonTree {
+    pub fn tree(&self) -> &YamlTree {
         &self.tree
     }
 
@@ -386,10 +386,10 @@ impl EditorState {
     /// # Example
     ///
     /// ```
-    /// # use jsonquill::document::node::{JsonNode, JsonValue};
-    /// # use jsonquill::document::tree::JsonTree;
-    /// # use jsonquill::editor::state::EditorState;
-    /// # let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![])));
+    /// # use yamlquill::document::node::{YamlNode, YamlValue};
+    /// # use yamlquill::document::tree::YamlTree;
+    /// # use yamlquill::editor::state::EditorState;
+    /// # let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
     /// # let mut state = EditorState::new_with_default_theme(tree);
     /// // Modify the tree
     /// let tree = state.tree_mut();
@@ -398,7 +398,7 @@ impl EditorState {
     /// // REQUIRED: Rebuild tree view after modifications
     /// state.rebuild_tree_view();
     /// ```
-    pub fn tree_mut(&mut self) -> &mut JsonTree {
+    pub fn tree_mut(&mut self) -> &mut YamlTree {
         &mut self.tree
     }
 
@@ -412,16 +412,16 @@ impl EditorState {
     ///
     /// Marks the document as dirty so the user can save the formatted result.
     pub fn format_document(&mut self) -> anyhow::Result<()> {
-        use crate::document::parser::parse_json;
-        use crate::file::loader::parse_jsonl_content;
+        use crate::document::parser::parse_yaml;
+        use crate::file::loader::parse_yamll_content;
         use crate::file::saver::{serialize_node_compact, serialize_node_jq_style};
 
         // Check if this is a JSONL document
-        let is_jsonl = matches!(self.tree.root().value(), JsonValue::JsonlRoot(_));
+        let is_jsonl = matches!(self.tree.root().value(), YamlValue::MultiDoc(_));
 
-        let json_str = if is_jsonl {
+        let yaml_str = if is_jsonl {
             // JSONL: use compact formatting (jq -c equivalent)
-            if let JsonValue::JsonlRoot(lines) = self.tree.root().value() {
+            if let YamlValue::MultiDoc(lines) = self.tree.root().value() {
                 let formatted_lines: Vec<String> =
                     lines.iter().map(serialize_node_compact).collect();
                 format!("{}\n", formatted_lines.join("\n"))
@@ -431,20 +431,20 @@ impl EditorState {
         } else {
             // Regular JSON: use jq-style multi-line formatting
             let indent_size = 2;
-            let mut json_str = serialize_node_jq_style(self.tree.root(), indent_size, 0);
+            let mut yaml_str = serialize_node_jq_style(self.tree.root(), indent_size, 0);
 
             // jq always ensures a trailing newline
-            if !json_str.ends_with('\n') {
-                json_str.push('\n');
+            if !yaml_str.ends_with('\n') {
+                yaml_str.push('\n');
             }
-            json_str
+            yaml_str
         };
 
         // Parse back to create a clean tree
         let new_tree = if is_jsonl {
-            parse_jsonl_content(&json_str)?
+            parse_yamll_content(&yaml_str)?
         } else {
-            parse_json(&json_str)?
+            parse_yaml(&yaml_str)?
         };
 
         // Reload with the formatted tree
@@ -460,7 +460,7 @@ impl EditorState {
     ///
     /// This is used when reloading from disk or opening a new file.
     /// It resets to default expansion state: fully expanded for JSON, collapsed for JSONL.
-    pub fn reload_tree(&mut self, tree: JsonTree) {
+    pub fn reload_tree(&mut self, tree: YamlTree) {
         self.tree = tree;
         self.dirty = false;
 
@@ -468,7 +468,7 @@ impl EditorState {
         // - Regular JSON files: fully expanded
         // - JSONL files: fully collapsed
         self.tree_view = TreeViewState::new();
-        if !matches!(self.tree.root().value(), JsonValue::JsonlRoot(_)) {
+        if !matches!(self.tree.root().value(), YamlValue::MultiDoc(_)) {
             self.tree_view.expand_all(&self.tree);
         }
         self.tree_view.rebuild(&self.tree);
@@ -495,12 +495,12 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::editor::mode::EditorMode;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::editor::mode::EditorMode;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
     ///
     /// assert_eq!(state.mode(), &EditorMode::Normal);
@@ -518,12 +518,12 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::editor::mode::EditorMode;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::editor::mode::EditorMode;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// state.set_mode(EditorMode::Insert);
@@ -541,11 +541,11 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
     ///
     /// let cursor = state.cursor();
@@ -562,11 +562,11 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// state.cursor_mut().push(0);
@@ -581,11 +581,11 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
     ///
     /// assert!(!state.is_dirty());
@@ -601,11 +601,11 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// state.mark_dirty();
@@ -622,11 +622,11 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// state.mark_dirty();
@@ -644,11 +644,11 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
     ///
     /// assert_eq!(state.filename(), None);
@@ -666,11 +666,11 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// state.set_filename("config.json".to_string());
@@ -685,11 +685,11 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
     ///
     /// let tree_view = state.tree_view();
@@ -707,12 +707,12 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("key".to_string(), JsonNode::new(JsonValue::Null)),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("key".to_string(), YamlNode::new(YamlValue::Null)),
     /// ])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
@@ -731,11 +731,11 @@ impl EditorState {
     /// # Example
     ///
     /// ```
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
-    /// use jsonquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
+    /// use yamlquill::editor::state::EditorState;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // After modifying the tree:
@@ -751,7 +751,7 @@ impl EditorState {
     /// Stores the deleted node in register history before deletion.
     /// Adjusts the cursor position after deletion and rebuilds the tree view.
     pub fn delete_node_at_cursor(&mut self) -> anyhow::Result<()> {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
         use crate::editor::registers::RegisterContent;
 
         let path = self.cursor.path().to_vec();
@@ -768,7 +768,7 @@ impl EditorState {
             let parent_path = &path[..path.len() - 1];
             let index = path[path.len() - 1];
             if let Some(parent) = self.tree.get_node(parent_path) {
-                if let JsonValue::Object(fields) = parent.value() {
+                if let YamlValue::Object(fields) = parent.value() {
                     Some(fields[index].0.clone())
                 } else {
                     None
@@ -794,11 +794,11 @@ impl EditorState {
             self.registers.set_unnamed(content.clone());
 
             // Sync to system clipboard
-            let json_value = self.node_to_serde_value(content.nodes[0].value());
-            if let Ok(json_str) = serde_json::to_string_pretty(&json_value) {
+            let yaml_value = self.node_to_serde_value(content.nodes[0].value());
+            if let Ok(yaml_str) = serde_yaml::to_string_pretty(&yaml_value) {
                 use arboard::Clipboard;
                 if let Ok(mut clipboard) = Clipboard::new() {
-                    let _ = clipboard.set_text(json_str);
+                    let _ = clipboard.set_text(yaml_str);
                 }
             }
         }
@@ -845,13 +845,13 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("a".to_string(), JsonNode::new(JsonValue::Number(1.0))),
-    ///     ("b".to_string(), JsonNode::new(JsonValue::Number(2.0))),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
     /// ])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
@@ -894,13 +894,13 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("a".to_string(), JsonNode::new(JsonValue::Number(1.0))),
-    ///     ("b".to_string(), JsonNode::new(JsonValue::Number(2.0))),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
     /// ])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
@@ -942,13 +942,13 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("user".to_string(), JsonNode::new(JsonValue::Object(vec![
-    ///         ("name".to_string(), JsonNode::new(JsonValue::String("Alice".to_string()))),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("user".to_string(), YamlNode::new(YamlValue::Object(vec![
+    ///         ("name".to_string(), YamlNode::new(YamlValue::String("Alice".to_string()))),
     ///     ]))),
     /// ])));
     /// let mut state = EditorState::new_with_default_theme(tree);
@@ -967,9 +967,9 @@ impl EditorState {
     pub fn toggle_expand_at_cursor(&mut self) {
         let current_path = self.cursor.path().to_vec();
 
-        // Check if we're expanding a JSONL line (direct child of JsonlRoot)
+        // Check if we're expanding a JSONL line (direct child of MultiDoc)
         let is_jsonl_line =
-            current_path.len() == 1 && matches!(self.tree.root().value(), JsonValue::JsonlRoot(_));
+            current_path.len() == 1 && matches!(self.tree.root().value(), YamlValue::MultiDoc(_));
 
         let was_expanded = self.tree_view.is_expanded(&current_path);
 
@@ -1276,14 +1276,14 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("a".to_string(), JsonNode::new(JsonValue::Number(1.0))),
-    ///     ("b".to_string(), JsonNode::new(JsonValue::Number(2.0))),
-    ///     ("c".to_string(), JsonNode::new(JsonValue::Number(3.0))),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
+    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(3.0))),
     /// ])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
@@ -1331,14 +1331,14 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("a".to_string(), JsonNode::new(JsonValue::Number(1.0))),
-    ///     ("b".to_string(), JsonNode::new(JsonValue::Number(2.0))),
-    ///     ("c".to_string(), JsonNode::new(JsonValue::Number(3.0))),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
+    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(3.0))),
     /// ])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
@@ -1377,14 +1377,14 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("a".to_string(), JsonNode::new(JsonValue::Number(1.0))),
-    ///     ("b".to_string(), JsonNode::new(JsonValue::Number(2.0))),
-    ///     ("c".to_string(), JsonNode::new(JsonValue::Number(3.0))),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
+    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(3.0))),
     /// ])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
@@ -1415,10 +1415,10 @@ impl EditorState {
             }
         };
 
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
         let sibling_count = match parent.value() {
-            JsonValue::Object(entries) => entries.len(),
-            JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => elements.len(),
+            YamlValue::Object(entries) => entries.len(),
+            YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => elements.len(),
             _ => return, // Parent is not a container
         };
 
@@ -1443,14 +1443,14 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// use jsonquill::editor::state::EditorState;
-    /// use jsonquill::document::node::{JsonNode, JsonValue};
-    /// use jsonquill::document::tree::JsonTree;
+    /// use yamlquill::editor::state::EditorState;
+    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::tree::YamlTree;
     ///
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![
-    ///     ("a".to_string(), JsonNode::new(JsonValue::Number(1.0))),
-    ///     ("b".to_string(), JsonNode::new(JsonValue::Number(2.0))),
-    ///     ("c".to_string(), JsonNode::new(JsonValue::Number(3.0))),
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
+    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(3.0))),
     /// ])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
@@ -1853,7 +1853,7 @@ impl EditorState {
     /// Yank nodes starting at cursor for count iterations.
     /// Updates target register (unnamed if not specified), register "0, and system clipboard (unnamed only).
     pub fn yank_nodes(&mut self, count: u32) -> bool {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
         use crate::editor::registers::RegisterContent;
 
         let mut nodes = Vec::new();
@@ -1871,7 +1871,7 @@ impl EditorState {
                     let parent_path = &path[..path.len() - 1];
                     let index = path[path.len() - 1];
                     if let Some(parent) = self.tree.get_node(parent_path) {
-                        if let JsonValue::Object(fields) = parent.value() {
+                        if let YamlValue::Object(fields) = parent.value() {
                             Some(fields[index].0.clone())
                         } else {
                             None
@@ -1919,22 +1919,22 @@ impl EditorState {
             // Sync to system clipboard
             let clipboard_text = if content.nodes.len() == 1 {
                 // Single node: serialize as-is
-                let json_value = self.node_to_serde_value(content.nodes[0].value());
-                serde_json::to_string_pretty(&json_value).ok()
+                let yaml_value = self.node_to_serde_value(content.nodes[0].value());
+                serde_yaml::to_string_pretty(&yaml_value).ok()
             } else {
                 // Multiple nodes: serialize as JSON array
-                let array: Vec<serde_json::Value> = content
+                let array: Vec<serde_yaml::Value> = content
                     .nodes
                     .iter()
                     .map(|node| self.node_to_serde_value(node.value()))
                     .collect();
-                serde_json::to_string_pretty(&array).ok()
+                serde_yaml::to_string_pretty(&array).ok()
             };
 
-            if let Some(json_str) = clipboard_text {
+            if let Some(yaml_str) = clipboard_text {
                 use arboard::Clipboard;
                 if let Ok(mut clipboard) = Clipboard::new() {
-                    let _ = clipboard.set_text(json_str);
+                    let _ = clipboard.set_text(yaml_str);
                 }
             }
         }
@@ -1945,29 +1945,29 @@ impl EditorState {
         true
     }
 
-    fn node_to_serde_value(&self, value: &crate::document::node::JsonValue) -> serde_json::Value {
-        use crate::document::node::JsonValue;
+    fn node_to_serde_value(&self, value: &crate::document::node::YamlValue) -> serde_yaml::Value {
+        use crate::document::node::YamlValue;
         match value {
-            JsonValue::Object(entries) => {
-                let map: serde_json::Map<String, serde_json::Value> = entries
+            YamlValue::Object(entries) => {
+                let map: serde_yaml::Map<String, serde_yaml::Value> = entries
                     .iter()
                     .map(|(k, v)| (k.clone(), self.node_to_serde_value(v.value())))
                     .collect();
-                serde_json::Value::Object(map)
+                serde_yaml::Value::Object(map)
             }
-            JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
-                let arr: Vec<serde_json::Value> = elements
+            YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
+                let arr: Vec<serde_yaml::Value> = elements
                     .iter()
                     .map(|v| self.node_to_serde_value(v.value()))
                     .collect();
-                serde_json::Value::Array(arr)
+                serde_yaml::Value::Array(arr)
             }
-            JsonValue::String(s) => serde_json::Value::String(s.clone()),
-            JsonValue::Number(n) => serde_json::Value::Number(
-                serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
+            YamlValue::String(s) => serde_yaml::Value::String(s.clone()),
+            YamlValue::Number(n) => serde_yaml::Value::Number(
+                serde_yaml::Number::from_f64(*n).unwrap_or_else(|| serde_yaml::Number::from(0)),
             ),
-            JsonValue::Boolean(b) => serde_json::Value::Bool(*b),
-            JsonValue::Null => serde_json::Value::Null,
+            YamlValue::Boolean(b) => serde_yaml::Value::Bool(*b),
+            YamlValue::Null => serde_yaml::Value::Null,
         }
     }
 
@@ -1998,9 +1998,9 @@ impl EditorState {
         }
 
         for &index in path.iter() {
-            use crate::document::node::JsonValue;
+            use crate::document::node::YamlValue;
             match current.value() {
-                JsonValue::Object(entries) => {
+                YamlValue::Object(entries) => {
                     if let Some((key, node)) = entries.get(index) {
                         match format {
                             "dot" | "jq" => {
@@ -2027,7 +2027,7 @@ impl EditorState {
                         return None;
                     }
                 }
-                JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+                YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                     if let Some(node) = elements.get(index) {
                         result.push('[');
                         result.push_str(&index.to_string());
@@ -2050,12 +2050,12 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// # use jsonquill::document::node::{JsonNode, JsonValue};
-    /// # use jsonquill::document::tree::JsonTree;
-    /// # use jsonquill::editor::state::EditorState;
-    /// let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+    /// # use yamlquill::document::node::{YamlNode, YamlValue};
+    /// # use yamlquill::document::tree::YamlTree;
+    /// # use yamlquill::editor::state::EditorState;
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
     ///     "key".to_string(),
-    ///     JsonNode::new(JsonValue::String("value".to_string())),
+    ///     YamlNode::new(YamlValue::String("value".to_string())),
     /// )])));
     /// let mut state = EditorState::new_with_default_theme(tree);
     /// // Cursor starts at first visible line ("key")
@@ -2218,11 +2218,11 @@ impl EditorState {
     /// Helper to paste a single node.
     fn paste_single_node(
         &mut self,
-        node: JsonNode,
+        node: YamlNode,
         key: Option<String>,
         after: bool,
     ) -> anyhow::Result<()> {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
         use anyhow::anyhow;
 
         let current_path = self.cursor.path().to_vec();
@@ -2236,7 +2236,7 @@ impl EditorState {
                 if is_container && is_expanded {
                     // Paste inside the expanded container as first child
                     match current_node.value() {
-                        JsonValue::Object(_) => {
+                        YamlValue::Object(_) => {
                             // For objects, need a key
                             let base_key = key.unwrap_or_else(|| "pasted".to_string());
                             let mut key_name = base_key.clone();
@@ -2251,7 +2251,7 @@ impl EditorState {
                                 };
 
                                 let key_exists =
-                                    if let JsonValue::Object(entries) = current_node.value() {
+                                    if let YamlValue::Object(entries) = current_node.value() {
                                         entries.iter().any(|(k, _)| k == &test_key)
                                     } else {
                                         false
@@ -2280,7 +2280,7 @@ impl EditorState {
                             self.cursor.set_path(insert_path);
                             return Ok(());
                         }
-                        JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+                        YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                             // Insert at beginning of array (index 0)
                             let mut insert_path = current_path.clone();
                             insert_path.push(0);
@@ -2302,7 +2302,7 @@ impl EditorState {
         // Handle root-level paste: insert inside root container
         if current_path.is_empty() {
             match self.tree.root().value() {
-                JsonValue::Object(_) => {
+                YamlValue::Object(_) => {
                     // For objects, need a key
                     let base_key = key.unwrap_or_else(|| "pasted".to_string());
                     let mut key_name = base_key.clone();
@@ -2317,7 +2317,7 @@ impl EditorState {
                         };
 
                         let key_exists =
-                            if let JsonValue::Object(entries) = self.tree.root().value() {
+                            if let YamlValue::Object(entries) = self.tree.root().value() {
                                 entries.iter().any(|(k, _)| k == &test_key)
                             } else {
                                 false
@@ -2350,7 +2350,7 @@ impl EditorState {
                     self.cursor.set_path(insert_path);
                     return Ok(());
                 }
-                JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+                YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                     // At root level:
                     // p (after) = paste as first child (index 0)
                     // P (before) = also paste as first child (index 0, can't go before root)
@@ -2394,7 +2394,7 @@ impl EditorState {
         };
 
         match parent.value() {
-            JsonValue::Object(_) => {
+            YamlValue::Object(_) => {
                 // Use the original key name if available, otherwise use "pasted"
                 let base_key = key.unwrap_or_else(|| "pasted".to_string());
                 let mut key_name = base_key.clone();
@@ -2415,7 +2415,7 @@ impl EditorState {
                         self.tree.get_node(parent_path).unwrap()
                     };
 
-                    let key_exists = if let JsonValue::Object(entries) = parent_ref.value() {
+                    let key_exists = if let YamlValue::Object(entries) = parent_ref.value() {
                         entries.iter().any(|(k, _)| k == &test_key)
                     } else {
                         false
@@ -2442,7 +2442,7 @@ impl EditorState {
                 self.rebuild_tree_view();
                 self.cursor.set_path(insert_path);
             }
-            JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+            YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                 let mut insert_path = parent_path.to_vec();
                 insert_path.push(insert_index);
 
@@ -2594,7 +2594,7 @@ impl EditorState {
 
     /// Executes a JSONPath query and populates search results.
     pub fn execute_jsonpath_search(&mut self, query: &str) {
-        use crate::jsonpath::{Evaluator, Parser};
+        use crate::yamlpath::{Evaluator, Parser};
 
         self.search_results.clear();
         self.search_index = 0;
@@ -2613,7 +2613,7 @@ impl EditorState {
         self.search_results = evaluator.evaluate_paths(&path.segments);
 
         // Set search type
-        self.search_type = Some(SearchType::JsonPath(query.to_string()));
+        self.search_type = Some(SearchType::YamlPath(query.to_string()));
 
         // Jump to first result or show message
         if !self.search_results.is_empty() {
@@ -2745,19 +2745,19 @@ impl EditorState {
         if let Some(node) = self.tree.get_node(path) {
             // Check if node is editable (not a container)
             match node.value() {
-                crate::document::node::JsonValue::Object(_)
-                | crate::document::node::JsonValue::Array(_)
-                | crate::document::node::JsonValue::JsonlRoot(_) => {
+                crate::document::node::YamlValue::Object(_)
+                | crate::document::node::YamlValue::Array(_)
+                | crate::document::node::YamlValue::MultiDoc(_) => {
                     // Can't edit containers
                 }
-                crate::document::node::JsonValue::String(s) => {
+                crate::document::node::YamlValue::String(s) => {
                     // Pre-populate with current string value (without JSON quotes)
                     let content = s.clone();
                     self.edit_cursor = content.len();
                     self.edit_buffer = Some(content);
                     self.reset_cursor_blink();
                 }
-                crate::document::node::JsonValue::Number(n) => {
+                crate::document::node::YamlValue::Number(n) => {
                     // Pre-populate with current number value
                     let num_str = if n.fract() == 0.0 && n.is_finite() {
                         format!("{:.0}", n)
@@ -2768,14 +2768,14 @@ impl EditorState {
                     self.edit_buffer = Some(num_str);
                     self.reset_cursor_blink();
                 }
-                crate::document::node::JsonValue::Boolean(b) => {
+                crate::document::node::YamlValue::Boolean(b) => {
                     // Pre-populate with current boolean value
                     let content = b.to_string();
                     self.edit_cursor = content.len();
                     self.edit_buffer = Some(content);
                     self.reset_cursor_blink();
                 }
-                crate::document::node::JsonValue::Null => {
+                crate::document::node::YamlValue::Null => {
                     // Pre-populate with "null"
                     self.edit_cursor = 4; // "null".len()
                     self.edit_buffer = Some("null".to_string());
@@ -2795,7 +2795,7 @@ impl EditorState {
     /// Parses the buffer according to the original node's type and updates the tree.
     /// Returns an error if the buffer content is invalid for the node's type.
     pub fn commit_editing(&mut self) -> anyhow::Result<()> {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
         use anyhow::{anyhow, Context};
 
         let buffer_content = self
@@ -2812,30 +2812,30 @@ impl EditorState {
 
         // Special case: "null" always converts to Null regardless of original type
         let new_value = if buffer_content == "null" {
-            JsonValue::Null
+            YamlValue::Null
         } else {
             // Otherwise, determine the new value based on the original node's type
             match node.value() {
-                JsonValue::String(_) => JsonValue::String(buffer_content),
-                JsonValue::Number(_) => {
+                YamlValue::String(_) => YamlValue::String(buffer_content),
+                YamlValue::Number(_) => {
                     let num = buffer_content
                         .parse::<f64>()
                         .context("Invalid number format")?;
-                    JsonValue::Number(num)
+                    YamlValue::Number(num)
                 }
-                JsonValue::Boolean(_) => {
+                YamlValue::Boolean(_) => {
                     let bool_val = match buffer_content.as_str() {
                         "true" => true,
                         "false" => false,
                         _ => return Err(anyhow!("Boolean value must be true or false")),
                     };
-                    JsonValue::Boolean(bool_val)
+                    YamlValue::Boolean(bool_val)
                 }
-                JsonValue::Null => {
+                YamlValue::Null => {
                     // This shouldn't happen since we checked for "null" above
-                    JsonValue::Null
+                    YamlValue::Null
                 }
-                JsonValue::Object(_) | JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+                YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                     return Err(anyhow!("Cannot edit container types"));
                 }
             }
@@ -3176,7 +3176,7 @@ impl EditorState {
     /// appropriate add_mode_stage. For arrays, immediately enters Insert mode.
     /// For objects, stays in Normal mode and waits for key input.
     pub fn start_add_operation(&mut self) {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
 
         // Clear any previous messages so the edit area is visible
         self.clear_message();
@@ -3187,11 +3187,11 @@ impl EditorState {
         if current_path.is_empty() {
             // Check if root is a container
             match self.tree.root().value() {
-                JsonValue::Object(_) | JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+                YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                     // Root is container, we can add to it
                     // Determine which type
                     match self.tree.root().value() {
-                        JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+                        YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                             // Array or JSONL: go straight to value input
                             self.add_mode_stage = AddModeStage::AwaitingValue;
                             self.add_insertion_point = Some(vec![0]); // Insert at position 0
@@ -3204,7 +3204,7 @@ impl EditorState {
                             // Set mode indicator message
                             self.set_message("-- INSERT --".to_string(), MessageLevel::Info);
                         }
-                        JsonValue::Object(_) => {
+                        YamlValue::Object(_) => {
                             // Object: need key first
                             self.add_mode_stage = AddModeStage::AwaitingKey;
                             self.clear_add_key_buffer(); // Reset buffer and cursor
@@ -3231,7 +3231,7 @@ impl EditorState {
         // If it's a NON-EMPTY container AT root, add inside it (can't add sibling to root)
         if let Some(current_node) = self.tree.get_node(&current_path) {
             match current_node.value() {
-                JsonValue::Array(elements) | JsonValue::JsonlRoot(elements) => {
+                YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                     // If array/JSONL is empty OR we're at root level, add inside it
                     if elements.is_empty() || current_path.is_empty() {
                         let insert_index = elements.len(); // Get length before mutable borrow
@@ -3257,7 +3257,7 @@ impl EditorState {
                     }
                     // Non-empty array/JSONL at non-root: fall through to add sibling after
                 }
-                JsonValue::Object(entries) => {
+                YamlValue::Object(entries) => {
                     // If object is empty OR we're at root level, add inside it
                     if entries.is_empty() || current_path.is_empty() {
                         let insert_index = entries.len(); // Get length before mutable borrow
@@ -3303,7 +3303,7 @@ impl EditorState {
 
         // Determine parent type and set up add operation
         match parent.value() {
-            JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+            YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                 // Adding to array/JSONL: insert after current element
                 self.add_mode_stage = AddModeStage::AwaitingValue;
                 let mut insertion_path = parent_path.to_vec();
@@ -3318,7 +3318,7 @@ impl EditorState {
                 // Set mode indicator message
                 self.set_message("-- INSERT --".to_string(), MessageLevel::Info);
             }
-            JsonValue::Object(_) => {
+            YamlValue::Object(_) => {
                 // Adding to object: need key first
                 self.add_mode_stage = AddModeStage::AwaitingKey;
                 self.clear_add_key_buffer(); // Reset buffer and cursor
@@ -3336,7 +3336,7 @@ impl EditorState {
 
     /// Commits the add operation by creating and inserting the new node.
     ///
-    /// Parses the edit buffer value, creates a JsonNode, inserts it at the
+    /// Parses the edit buffer value, creates a YamlNode, inserts it at the
     /// add_insertion_point, creates an undo checkpoint, and moves cursor to
     /// the new node.
     pub fn commit_add_operation(&mut self) -> anyhow::Result<()> {
@@ -3355,7 +3355,7 @@ impl EditorState {
 
         // Parse the value
         let value = parse_scalar_value(value_str);
-        let node = JsonNode::new(value);
+        let node = YamlNode::new(value);
 
         // Get insertion point
         let insertion_path = self
@@ -3380,11 +3380,11 @@ impl EditorState {
         };
 
         match parent.value() {
-            JsonValue::Array(_) => {
+            YamlValue::Array(_) => {
                 self.tree.insert_node_in_array(&insertion_path, node)?;
                 self.set_message("Added element".to_string(), MessageLevel::Info);
             }
-            JsonValue::Object(_) => {
+            YamlValue::Object(_) => {
                 let key = self.add_key_buffer.clone();
                 self.tree
                     .insert_node_in_object(&insertion_path, key.clone(), node)?;
@@ -3456,7 +3456,7 @@ impl EditorState {
     ///
     /// * `is_object` - true for object {}, false for array []
     pub fn start_add_container_operation(&mut self, is_object: bool) {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
 
         // Clear any previous messages so the edit area is visible
         self.clear_message();
@@ -3465,16 +3465,16 @@ impl EditorState {
 
         // Create the container node
         let container_node = if is_object {
-            JsonNode::new(JsonValue::Object(vec![]))
+            YamlNode::new(YamlValue::Object(vec![]))
         } else {
-            JsonNode::new(JsonValue::Array(vec![]))
+            YamlNode::new(YamlValue::Array(vec![]))
         };
 
         // Special case: if cursor is at root (empty path)
         if current_path.is_empty() {
             // At root - check if root is a container
             match self.tree.root().value() {
-                JsonValue::Object(_) => {
+                YamlValue::Object(_) => {
                     self.add_mode_stage = AddModeStage::AwaitingKey;
                     self.clear_add_key_buffer(); // Reset buffer and cursor
                     self.add_insertion_point = Some(vec![0]);
@@ -3484,7 +3484,7 @@ impl EditorState {
                     self.reset_cursor_blink();
                     return;
                 }
-                JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+                YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                     // Insert directly into array/JSONL at position 0
                     let insertion_path = vec![0];
                     match self
@@ -3527,7 +3527,7 @@ impl EditorState {
         // If it's non-empty and not at root, add as sibling (to preserve expansion state)
         if let Some(current_node) = self.tree.get_node(&current_path) {
             match current_node.value() {
-                JsonValue::Array(elements) | JsonValue::JsonlRoot(elements)
+                YamlValue::Array(elements) | YamlValue::MultiDoc(elements)
                     if elements.is_empty() || current_path.is_empty() =>
                 {
                     let insert_index = elements.len(); // Get length before mutable borrow
@@ -3566,7 +3566,7 @@ impl EditorState {
                     }
                     return;
                 }
-                JsonValue::Object(entries) if entries.is_empty() || current_path.is_empty() => {
+                YamlValue::Object(entries) if entries.is_empty() || current_path.is_empty() => {
                     let insert_index = entries.len(); // Get length before mutable borrow
 
                     // Empty object or root-level object: add inside it
@@ -3613,7 +3613,7 @@ impl EditorState {
         path.push(current_index + 1);
 
         match parent.value() {
-            JsonValue::Object(_) => {
+            YamlValue::Object(_) => {
                 self.add_mode_stage = AddModeStage::AwaitingKey;
                 self.clear_add_key_buffer(); // Reset buffer and cursor
                 self.add_insertion_point = Some(path);
@@ -3622,7 +3622,7 @@ impl EditorState {
                 self.temp_container = Some(container_node);
                 self.reset_cursor_blink();
             }
-            JsonValue::Array(_) | JsonValue::JsonlRoot(_) => {
+            YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                 // Insert directly into array/JSONL (no key needed)
                 match self.tree.insert_node_in_array(&path, container_node) {
                     Ok(_) => {
@@ -3656,7 +3656,7 @@ impl EditorState {
     /// then enters Insert mode with the current key name pre-populated in the
     /// edit buffer.
     pub fn start_rename_operation(&mut self) {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
 
         // Clear any previous messages so the edit area is visible
         self.clear_message();
@@ -3686,7 +3686,7 @@ impl EditorState {
         };
 
         // Check if parent is an object
-        if let JsonValue::Object(entries) = parent.value() {
+        if let YamlValue::Object(entries) = parent.value() {
             // Get the current key name
             if let Some((key, _)) = entries.get(current_index) {
                 let key_name = key.clone();
@@ -3712,7 +3712,7 @@ impl EditorState {
 
     /// Commits the rename operation, updating the key name in the object.
     pub fn commit_rename(&mut self) -> anyhow::Result<()> {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
         use anyhow::anyhow;
 
         let new_key = self
@@ -3754,7 +3754,7 @@ impl EditorState {
                 .ok_or_else(|| anyhow!("Parent node not found"))?
         };
 
-        if let JsonValue::Object(entries) = parent.value_mut() {
+        if let YamlValue::Object(entries) = parent.value_mut() {
             // Check if new key already exists
             if entries.iter().any(|(k, _)| k == &new_key) {
                 return Err(anyhow!("Key '{}' already exists", new_key));
@@ -3834,8 +3834,8 @@ impl EditorState {
         self.checkpoint();
 
         let container_type = match container_node.value() {
-            JsonValue::Object(_) => "object",
-            JsonValue::Array(_) => "array",
+            YamlValue::Object(_) => "object",
+            YamlValue::Array(_) => "array",
             _ => "container",
         };
         self.set_message(
@@ -4009,7 +4009,7 @@ impl EditorState {
 
     /// Yanks all nodes in the given range.
     fn yank_nodes_in_range(&mut self, range: &[Vec<usize>], _count: u32) -> anyhow::Result<()> {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
         use crate::editor::registers::RegisterContent;
         use anyhow::anyhow;
 
@@ -4030,7 +4030,7 @@ impl EditorState {
                     let parent_path = &path[..path.len() - 1];
                     let index = path[path.len() - 1];
                     if let Some(parent) = self.tree.get_node(parent_path) {
-                        if let JsonValue::Object(fields) = parent.value() {
+                        if let YamlValue::Object(fields) = parent.value() {
                             Some(fields[index].0.clone())
                         } else {
                             None
@@ -4065,11 +4065,11 @@ impl EditorState {
 
             // Sync first node to system clipboard
             if !content.nodes.is_empty() {
-                let json_value = self.node_to_serde_value(content.nodes[0].value());
-                if let Ok(json_str) = serde_json::to_string_pretty(&json_value) {
+                let yaml_value = self.node_to_serde_value(content.nodes[0].value());
+                if let Ok(yaml_str) = serde_yaml::to_string_pretty(&yaml_value) {
                     use arboard::Clipboard;
                     if let Ok(mut clipboard) = Clipboard::new() {
-                        let _ = clipboard.set_text(json_str);
+                        let _ = clipboard.set_text(yaml_str);
                     }
                 }
             }
@@ -4186,7 +4186,7 @@ impl EditorState {
     ///
     /// Returns the number of nodes yanked.
     pub fn yank_visual_selection(&mut self) -> usize {
-        use crate::document::node::JsonValue;
+        use crate::document::node::YamlValue;
         use crate::editor::registers::RegisterContent;
 
         if self.visual_selection.is_empty() {
@@ -4206,7 +4206,7 @@ impl EditorState {
                     let parent_path = &path[..path.len() - 1];
                     let index = path[path.len() - 1];
                     if let Some(parent) = self.tree.get_node(parent_path) {
-                        if let JsonValue::Object(fields) = parent.value() {
+                        if let YamlValue::Object(fields) = parent.value() {
                             Some(fields[index].0.clone())
                         } else {
                             None
@@ -4245,16 +4245,16 @@ impl EditorState {
             // Sync to system clipboard
             let clipboard_text = if content.nodes.len() == 1 {
                 // Single node: serialize as-is
-                let json_value = self.node_to_serde_value(content.nodes[0].value());
-                serde_json::to_string_pretty(&json_value).ok()
+                let yaml_value = self.node_to_serde_value(content.nodes[0].value());
+                serde_yaml::to_string_pretty(&yaml_value).ok()
             } else {
                 // Multiple nodes: serialize as JSON array
-                let array: Vec<serde_json::Value> = content
+                let array: Vec<serde_yaml::Value> = content
                     .nodes
                     .iter()
                     .map(|node| self.node_to_serde_value(node.value()))
                     .collect();
-                serde_json::to_string_pretty(&array).ok()
+                serde_yaml::to_string_pretty(&array).ok()
             };
 
             if let Some(text) = clipboard_text {
@@ -4422,18 +4422,18 @@ impl EditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{JsonNode, JsonValue};
-    use crate::document::tree::JsonTree;
+    use crate::document::node::{YamlNode, YamlValue};
+    use crate::document::tree::YamlTree;
 
     #[test]
     fn test_get_current_path_dot_notation() {
         // Create tree: {"users": [{"name": "Alice"}]}
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "users".to_string(),
-            JsonNode::new(JsonValue::Array(vec![JsonNode::new(JsonValue::Object(
+            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
                 vec![(
                     "name".to_string(),
-                    JsonNode::new(JsonValue::String("Alice".to_string())),
+                    YamlNode::new(YamlValue::String("Alice".to_string())),
                 )],
             ))])),
         )])));
@@ -4459,14 +4459,14 @@ mod tests {
     #[test]
     fn test_get_current_path_jsonl() {
         // Create JSONL tree with lines: [{"id": 1}, {"id": 2}]
-        let tree = JsonTree::new(JsonNode::new(JsonValue::JsonlRoot(vec![
-            JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::MultiDoc(vec![
+            YamlNode::new(YamlValue::Object(vec![(
                 "id".to_string(),
-                JsonNode::new(JsonValue::Number(1.0)),
+                YamlNode::new(YamlValue::Number(1.0)),
             )])),
-            JsonNode::new(JsonValue::Object(vec![(
+            YamlNode::new(YamlValue::Object(vec![(
                 "id".to_string(),
-                JsonNode::new(JsonValue::Number(2.0)),
+                YamlNode::new(YamlValue::Number(2.0)),
             )])),
         ])));
 
@@ -4496,7 +4496,7 @@ mod tests {
 
     #[test]
     fn test_editor_state_has_registers() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Null));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let state = EditorState::new_with_default_theme(tree);
 
         // Should start with empty registers
@@ -4507,9 +4507,9 @@ mod tests {
 
     #[test]
     fn test_yank_to_named_register() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Object(vec![(
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
             "key".to_string(),
-            JsonNode::new(JsonValue::String("value".to_string())),
+            YamlNode::new(YamlValue::String("value".to_string())),
         )])));
 
         let mut state = EditorState::new_with_default_theme(tree);
@@ -4527,8 +4527,8 @@ mod tests {
 
     #[test]
     fn test_paste_from_named_register() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Array(vec![JsonNode::new(
-            JsonValue::String("existing".to_string()),
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![YamlNode::new(
+            YamlValue::String("existing".to_string()),
         )])));
 
         let mut state = EditorState::new_with_default_theme(tree);
@@ -4540,7 +4540,7 @@ mod tests {
         state.move_cursor_down();
 
         // Manually populate register 'a'
-        let node = JsonNode::new(JsonValue::String("test".to_string()));
+        let node = YamlNode::new(YamlValue::String("test".to_string()));
         let content = crate::editor::registers::RegisterContent::new(vec![node], vec![None]);
         state.registers.set_named('a', content);
 
@@ -4553,8 +4553,8 @@ mod tests {
 
     #[test]
     fn test_paste_from_numbered_register() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Array(vec![JsonNode::new(
-            JsonValue::String("existing".to_string()),
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![YamlNode::new(
+            YamlValue::String("existing".to_string()),
         )])));
 
         let mut state = EditorState::new_with_default_theme(tree);
@@ -4566,7 +4566,7 @@ mod tests {
         state.move_cursor_down();
 
         // Manually populate register "0
-        let node = JsonNode::new(JsonValue::Number(42.0));
+        let node = YamlNode::new(YamlValue::Number(42.0));
         let content = crate::editor::registers::RegisterContent::new(vec![node], vec![None]);
         state.registers.set_numbered(0, content);
 
@@ -4579,9 +4579,9 @@ mod tests {
 
     #[test]
     fn test_delete_pushes_to_history() {
-        let tree = JsonTree::new(JsonNode::new(JsonValue::Array(vec![
-            JsonNode::new(JsonValue::Number(1.0)),
-            JsonNode::new(JsonValue::Number(2.0)),
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![
+            YamlNode::new(YamlValue::Number(1.0)),
+            YamlNode::new(YamlValue::Number(2.0)),
         ])));
 
         let mut state = EditorState::new_with_default_theme(tree);
