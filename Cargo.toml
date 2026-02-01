@@ -1,0 +1,28 @@
+[package]
+name = "yamlquill"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Joey Gibson"]
+description = "YAMLQuill - A terminal-based structural YAML editor with vim-style keybindings"
+repository = "https://github.com/joeygibson/yamlquill"
+readme = "README.md"
+keywords = ["yaml", "editor", "tui", "vim", "terminal"]
+categories = ["command-line-utilities", "text-editors"]
+
+[dependencies]
+ratatui = { version = "0.29", default-features = false, features = ["termion"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+indexmap = { version = "2.0", features = ["serde"] }
+termion = "4.0"
+clap = { version = "4.5", features = ["derive"] }
+toml = "0.8"
+anyhow = "1.0"
+arboard = "3.4"
+dirs = "5.0"
+flate2 = "1.0"
+
+[dev-dependencies]
+tempfile = "3.13"
+serde_json = "1.0"
