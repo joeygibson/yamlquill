@@ -361,10 +361,11 @@ impl YamlTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::node::YamlString;
 
     #[test]
     fn test_tree_with_original_source() {
-        let root = YamlNode::new(YamlValue::String("test".to_string()));
+        let root = YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string())));
         let tree = YamlTree::with_source(root.clone(), Some("\"test\"".to_string()));
 
         assert_eq!(tree.original_source(), Some("\"test\""));
