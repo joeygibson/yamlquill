@@ -3012,6 +3012,15 @@ impl EditorState {
         }
     }
 
+    /// Sets the edit buffer directly (test-only).
+    ///
+    /// **Warning:** This is only for testing purposes. Do not use in production code.
+    #[doc(hidden)]
+    pub fn set_edit_buffer_for_test(&mut self, content: String) {
+        self.edit_cursor = content.len();
+        self.edit_buffer = Some(content);
+    }
+
     /// Moves the edit cursor left by one character.
     pub fn edit_cursor_left(&mut self) {
         if let Some(ref buffer) = self.edit_buffer {

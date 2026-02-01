@@ -1,0 +1,630 @@
+//! Integration tests for editor state features (undo/redo, registers, visual mode)
+//!
+//! Phase 2d: Validates that undo/redo, registers, and visual mode work correctly
+//! with YAML editing operations.
+
+use yamlquill::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
+use yamlquill::document::tree::YamlTree;
+use yamlquill::editor::state::EditorState;
+use indexmap::IndexMap;
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+/// Creates a simple YAML tree for testing: { name: "test", count: 42, active: true }
+fn create_simple_tree() -> YamlTree {
+    let mut obj = IndexMap::new();
+    obj.insert(
+        "name".to_string(),
+        YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))),
+    );
+    obj.insert(
+        "count".to_string(),
+        YamlNode::new(YamlValue::Number(YamlNumber::Integer(42))),
+    );
+    obj.insert(
+        "active".to_string(),
+        YamlNode::new(YamlValue::Boolean(true)),
+    );
+    YamlTree::new(YamlNode::new(YamlValue::Object(obj)))
+}
+
+/// Creates a tree with different YamlString styles for testing preservation
+fn create_string_styles_tree() -> YamlTree {
+    let mut obj = IndexMap::new();
+    obj.insert(
+        "plain".to_string(),
+        YamlNode::new(YamlValue::String(YamlString::Plain("plain text".to_string()))),
+    );
+    obj.insert(
+        "literal".to_string(),
+        YamlNode::new(YamlValue::String(YamlString::Literal(
+            "line1\nline2".to_string(),
+        ))),
+    );
+    obj.insert(
+        "folded".to_string(),
+        YamlNode::new(YamlValue::String(YamlString::Folded(
+            "folded text".to_string(),
+        ))),
+    );
+    YamlTree::new(YamlNode::new(YamlValue::Object(obj)))
+}
+
+/// Creates an EditorState for testing
+fn create_test_editor(tree: YamlTree) -> EditorState {
+    EditorState::new_with_default_theme(tree)
+}
+
+// ============================================================================
+// Undo/Redo Tests
+// ============================================================================
+
+#[test]
+fn test_undo_after_edit_string() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "name" field (index 0 in object)
+    state.cursor_mut().set_path(vec![0]);
+
+    // Get original value
+    let original_node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(original)) = original_node.value() {
+        assert_eq!(original, "test");
+    } else {
+        panic!("Expected Plain string");
+    }
+
+    // Edit the value
+    state.edit_buffer = Some("modified".to_string());
+    state.commit_editing().unwrap();
+
+    // Verify edit worked
+    let edited_node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(edited)) = edited_node.value() {
+        assert_eq!(edited, "modified");
+    } else {
+        panic!("Expected Plain string");
+    }
+
+    // Undo the edit
+    let undo_success = state.undo();
+    assert!(undo_success, "Undo should succeed");
+
+    // Verify original value restored
+    let restored_node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(restored)) = restored_node.value() {
+        assert_eq!(restored, "test", "Undo should restore original value");
+    } else {
+        panic!("Expected Plain string after undo");
+    }
+}
+
+#[test]
+fn test_undo_after_edit_integer() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "count" field (index 1 in object)
+    state.cursor_mut().set_path(vec![1]);
+
+    // Get original value
+    let original_node = state.tree().get_node(&[1]).unwrap();
+    if let YamlValue::Number(YamlNumber::Integer(original)) = original_node.value() {
+        assert_eq!(*original, 42);
+    } else {
+        panic!("Expected Integer");
+    }
+
+    // Edit the value
+    state.edit_buffer = Some("100".to_string());
+    state.commit_editing().unwrap();
+
+    // Verify edit worked
+    let edited_node = state.tree().get_node(&[1]).unwrap();
+    if let YamlValue::Number(YamlNumber::Integer(edited)) = edited_node.value() {
+        assert_eq!(*edited, 100);
+    } else {
+        panic!("Expected Integer");
+    }
+
+    // Undo the edit
+    let undo_success = state.undo();
+    assert!(undo_success, "Undo should succeed");
+
+    // Verify original value restored
+    let restored_node = state.tree().get_node(&[1]).unwrap();
+    if let YamlValue::Number(YamlNumber::Integer(restored)) = restored_node.value() {
+        assert_eq!(*restored, 42, "Undo should restore original value");
+    } else {
+        panic!("Expected Integer after undo");
+    }
+}
+
+#[test]
+fn test_undo_after_edit_float() {
+    let mut obj = IndexMap::new();
+    obj.insert(
+        "value".to_string(),
+        YamlNode::new(YamlValue::Number(YamlNumber::Float(3.14))),
+    );
+    let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "value" field
+    state.cursor_mut().set_path(vec![0]);
+
+    // Edit the value
+    state.edit_buffer = Some("2.71".to_string());
+    state.commit_editing().unwrap();
+
+    // Verify edit worked
+    let edited_node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::Number(YamlNumber::Float(edited)) = edited_node.value() {
+        assert!((edited - 2.71).abs() < 0.001);
+    } else {
+        panic!("Expected Float");
+    }
+
+    // Undo the edit
+    assert!(state.undo());
+
+    // Verify original value restored
+    let restored_node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::Number(YamlNumber::Float(restored)) = restored_node.value() {
+        assert!((restored - 3.14).abs() < 0.001);
+    } else {
+        panic!("Expected Float after undo");
+    }
+}
+
+#[test]
+fn test_undo_after_edit_boolean() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "active" field (index 2 in object)
+    state.cursor_mut().set_path(vec![2]);
+
+    // Edit the value
+    state.edit_buffer = Some("false".to_string());
+    state.commit_editing().unwrap();
+
+    // Verify edit worked
+    let edited_node = state.tree().get_node(&[2]).unwrap();
+    if let YamlValue::Boolean(edited) = edited_node.value() {
+        assert!(!edited);
+    } else {
+        panic!("Expected Boolean");
+    }
+
+    // Undo the edit
+    assert!(state.undo());
+
+    // Verify original value restored
+    let restored_node = state.tree().get_node(&[2]).unwrap();
+    if let YamlValue::Boolean(restored) = restored_node.value() {
+        assert!(*restored, "Undo should restore original true value");
+    } else {
+        panic!("Expected Boolean after undo");
+    }
+}
+
+#[test]
+fn test_redo_after_undo() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "name" field
+    state.cursor_mut().set_path(vec![0]);
+
+    // Edit the value
+    state.edit_buffer = Some("modified".to_string());
+    state.commit_editing().unwrap();
+
+    // Undo the edit
+    assert!(state.undo());
+
+    // Verify we're back to original
+    let undone_node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(undone)) = undone_node.value() {
+        assert_eq!(undone, "test");
+    } else {
+        panic!("Expected Plain string");
+    }
+
+    // Redo the edit
+    let redo_success = state.redo();
+    assert!(redo_success, "Redo should succeed");
+
+    // Verify edited value restored
+    let redone_node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(redone)) = redone_node.value() {
+        assert_eq!(redone, "modified", "Redo should restore edited value");
+    } else {
+        panic!("Expected Plain string after redo");
+    }
+}
+
+#[test]
+fn test_multi_step_undo_redo() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "name" field
+    state.cursor_mut().set_path(vec![0]);
+
+    // First edit
+    state.edit_buffer = Some("edit1".to_string());
+    state.commit_editing().unwrap();
+
+    // Second edit
+    state.edit_buffer = Some("edit2".to_string());
+    state.commit_editing().unwrap();
+
+    // Verify second edit
+    let node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(s)) = node.value() {
+        assert_eq!(s, "edit2");
+    }
+
+    // Undo once (back to edit1)
+    assert!(state.undo());
+    let node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(s)) = node.value() {
+        assert_eq!(s, "edit1");
+    }
+
+    // Undo twice (back to original)
+    assert!(state.undo());
+    let node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(s)) = node.value() {
+        assert_eq!(s, "test");
+    }
+
+    // Redo once (to edit1)
+    assert!(state.redo());
+    let node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(s)) = node.value() {
+        assert_eq!(s, "edit1");
+    }
+
+    // Redo twice (to edit2)
+    assert!(state.redo());
+    let node = state.tree().get_node(&[0]).unwrap();
+    if let YamlValue::String(YamlString::Plain(s)) = node.value() {
+        assert_eq!(s, "edit2");
+    }
+}
+
+#[test]
+fn test_undo_preserves_yaml_string_style_plain() {
+    let tree = create_string_styles_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "plain" field
+    state.cursor_mut().set_path(vec![0]);
+
+    // Edit the value
+    state.edit_buffer = Some("modified plain".to_string());
+    state.commit_editing().unwrap();
+
+    // Undo
+    assert!(state.undo());
+
+    // Verify style preserved
+    let node = state.tree().get_node(&[0]).unwrap();
+    match node.value() {
+        YamlValue::String(YamlString::Plain(s)) => {
+            assert_eq!(s, "plain text");
+        }
+        _ => panic!("Expected Plain string after undo"),
+    }
+}
+
+#[test]
+fn test_undo_preserves_yaml_string_style_literal() {
+    let tree = create_string_styles_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "literal" field (index 1)
+    state.cursor_mut().set_path(vec![1]);
+
+    // Edit the value
+    state.edit_buffer = Some("modified\nliteral".to_string());
+    state.commit_editing().unwrap();
+
+    // Undo
+    assert!(state.undo());
+
+    // Verify style preserved as Literal
+    let node = state.tree().get_node(&[1]).unwrap();
+    match node.value() {
+        YamlValue::String(YamlString::Literal(s)) => {
+            assert_eq!(s, "line1\nline2");
+        }
+        _ => panic!("Expected Literal string after undo"),
+    }
+}
+
+#[test]
+fn test_undo_preserves_yaml_string_style_folded() {
+    let tree = create_string_styles_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "folded" field (index 2)
+    state.cursor_mut().set_path(vec![2]);
+
+    // Edit the value
+    state.edit_buffer = Some("modified folded".to_string());
+    state.commit_editing().unwrap();
+
+    // Undo
+    assert!(state.undo());
+
+    // Verify style preserved as Folded
+    let node = state.tree().get_node(&[2]).unwrap();
+    match node.value() {
+        YamlValue::String(YamlString::Folded(s)) => {
+            assert_eq!(s, "folded text");
+        }
+        _ => panic!("Expected Folded string after undo"),
+    }
+}
+
+#[test]
+fn test_undo_at_root_returns_false() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Try to undo without making any changes
+    let undo_success = state.undo();
+    assert!(!undo_success, "Undo at root should return false");
+
+    // Editor should still be in valid state
+    assert_eq!(state.tree().get_node(&[0]).is_some(), true);
+}
+
+#[test]
+fn test_redo_with_no_future_returns_false() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Try to redo without any undo
+    let redo_success = state.redo();
+    assert!(!redo_success, "Redo with no future should return false");
+
+    // Make an edit
+    state.cursor_mut().set_path(vec![0]);
+    state.edit_buffer = Some("modified".to_string());
+    state.commit_editing().unwrap();
+
+    // Try to redo again (still no future)
+    let redo_success = state.redo();
+    assert!(!redo_success, "Redo after new edit should return false");
+}
+
+// ============================================================================
+// Register Type Preservation Tests
+// ============================================================================
+
+#[test]
+fn test_register_preserves_plain_string() {
+    let tree = create_string_styles_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "plain" field and yank
+    state.cursor_mut().set_path(vec![0]);
+    state.yank_nodes(1);
+
+    // Navigate to different field
+    state.cursor_mut().set_path(vec![1]); // literal
+
+    // Paste
+    state.paste_node_at_cursor().unwrap();
+
+    // Verify pasted node is still Plain string
+    // After paste, we should have: plain, literal, plain (pasted), folded
+    let pasted_node = state.tree().get_node(&[2]).unwrap();
+    match pasted_node.value() {
+        YamlValue::String(YamlString::Plain(s)) => {
+            assert_eq!(s, "plain text", "Pasted value should match");
+        }
+        _ => panic!("Pasted node should be Plain string"),
+    }
+}
+
+#[test]
+fn test_register_preserves_literal_string() {
+    let tree = create_string_styles_tree();
+    let mut state = create_test_editor(tree);
+
+    // Navigate to "literal" field and yank
+    state.cursor_mut().set_path(vec![1]);
+    state.yank_nodes(1);
+
+    // Navigate to different field
+    state.cursor_mut().set_path(vec![2]); // folded
+
+    // Paste
+    state.paste_node_at_cursor().unwrap();
+
+    // Verify pasted node is still Literal string
+    let pasted_node = state.tree().get_node(&[3]).unwrap();
+    match pasted_node.value() {
+        YamlValue::String(YamlString::Literal(s)) => {
+            assert_eq!(s, "line1\nline2");
+        }
+        _ => panic!("Pasted node should be Literal string"),
+    }
+}
+
+#[test]
+fn test_register_preserves_integer_not_float() {
+    let mut obj = IndexMap::new();
+    obj.insert(
+        "int_value".to_string(),
+        YamlNode::new(YamlValue::Number(YamlNumber::Integer(42))),
+    );
+    obj.insert(
+        "other".to_string(),
+        YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))),
+    );
+    let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
+    let mut state = create_test_editor(tree);
+
+    // Yank integer
+    state.cursor_mut().set_path(vec![0]);
+    state.yank_nodes(1);
+
+    // Paste
+    state.cursor_mut().set_path(vec![1]);
+    state.paste_node_at_cursor().unwrap();
+
+    // Verify pasted node is still Integer (not Float)
+    let pasted_node = state.tree().get_node(&[2]).unwrap();
+    match pasted_node.value() {
+        YamlValue::Number(YamlNumber::Integer(i)) => {
+            assert_eq!(*i, 42);
+        }
+        YamlValue::Number(YamlNumber::Float(_)) => {
+            panic!("Integer should not be converted to Float");
+        }
+        _ => panic!("Pasted node should be Integer"),
+    }
+}
+
+#[test]
+fn test_register_preserves_float() {
+    let mut obj = IndexMap::new();
+    obj.insert(
+        "float_value".to_string(),
+        YamlNode::new(YamlValue::Number(YamlNumber::Float(3.14))),
+    );
+    obj.insert(
+        "other".to_string(),
+        YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))),
+    );
+    let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
+    let mut state = create_test_editor(tree);
+
+    // Yank float
+    state.cursor_mut().set_path(vec![0]);
+    state.yank_nodes(1);
+
+    // Paste
+    state.cursor_mut().set_path(vec![1]);
+    state.paste_node_at_cursor().unwrap();
+
+    // Verify pasted node is still Float
+    let pasted_node = state.tree().get_node(&[2]).unwrap();
+    match pasted_node.value() {
+        YamlValue::Number(YamlNumber::Float(f)) => {
+            assert!((f - 3.14).abs() < 0.001);
+        }
+        _ => panic!("Pasted node should be Float"),
+    }
+}
+
+#[test]
+fn test_register_preserves_boolean() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Yank boolean
+    state.cursor_mut().set_path(vec![2]); // active (boolean)
+    state.yank_nodes(1);
+
+    // Paste after name
+    state.cursor_mut().set_path(vec![0]); // name
+    state.paste_node_at_cursor().unwrap();
+
+    // Verify pasted node is still Boolean
+    let pasted_node = state.tree().get_node(&[1]).unwrap();
+    match pasted_node.value() {
+        YamlValue::Boolean(b) => {
+            assert!(*b);
+        }
+        _ => panic!("Pasted node should be Boolean"),
+    }
+}
+
+#[test]
+fn test_register_preserves_object_structure() {
+    let mut inner = IndexMap::new();
+    inner.insert(
+        "nested".to_string(),
+        YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string()))),
+    );
+
+    let mut obj = IndexMap::new();
+    obj.insert(
+        "object".to_string(),
+        YamlNode::new(YamlValue::Object(inner)),
+    );
+    obj.insert(
+        "other".to_string(),
+        YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))),
+    );
+
+    let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
+    let mut state = create_test_editor(tree);
+
+    // Yank object
+    state.cursor_mut().set_path(vec![0]); // object
+    state.yank_nodes(1);
+
+    // Paste
+    state.cursor_mut().set_path(vec![1]); // other
+    state.paste_node_at_cursor().unwrap();
+
+    // Verify pasted node is still Object with same structure
+    let pasted_node = state.tree().get_node(&[2]).unwrap();
+    match pasted_node.value() {
+        YamlValue::Object(map) => {
+            assert_eq!(map.len(), 1);
+            assert!(map.contains_key("nested"));
+        }
+        _ => panic!("Pasted node should be Object"),
+    }
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+#[test]
+fn test_paste_empty_register_returns_error() {
+    let tree = create_simple_tree();
+    let mut state = create_test_editor(tree);
+
+    // Try to paste without yanking anything first
+    state.cursor_mut().set_path(vec![0]);
+    let result = state.paste_node_at_cursor();
+
+    assert!(result.is_err(), "Paste with empty register should fail");
+}
+
+#[test]
+fn test_edit_null_and_undo() {
+    let mut obj = IndexMap::new();
+    obj.insert("null_field".to_string(), YamlNode::new(YamlValue::Null));
+    let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
+    let mut state = create_test_editor(tree);
+
+    // Navigate to null field
+    state.cursor_mut().set_path(vec![0]);
+
+    // Edit null to "null" (stays null)
+    state.edit_buffer = Some("null".to_string());
+    state.commit_editing().unwrap();
+
+    // Verify still null
+    let node = state.tree().get_node(&[0]).unwrap();
+    assert!(matches!(node.value(), YamlValue::Null));
+
+    // Undo should work
+    assert!(state.undo());
+}
