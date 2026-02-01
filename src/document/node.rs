@@ -49,11 +49,28 @@ pub enum YamlString {
     Folded(String),
 }
 
+impl std::fmt::Display for YamlString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl YamlString {
     pub fn as_str(&self) -> &str {
         match self {
             YamlString::Plain(s) | YamlString::Literal(s) | YamlString::Folded(s) => s,
         }
+    }
+
+    pub fn is_multiline(&self) -> bool {
+        match self {
+            YamlString::Plain(s) => s.contains('\n'),
+            YamlString::Literal(_) | YamlString::Folded(_) => true,
+        }
+    }
+
+    pub fn line_count(&self) -> usize {
+        self.as_str().lines().count()
     }
 }
 
@@ -329,5 +346,32 @@ mod text_span_tests {
 
         assert!(metadata.text_span.is_none());
         assert!(metadata.modified);
+    }
+
+    #[test]
+    fn test_yaml_string_display() {
+        let plain = YamlString::Plain("hello".to_string());
+        assert_eq!(format!("{}", plain), "hello");
+    }
+
+    #[test]
+    fn test_yaml_string_is_multiline() {
+        let plain_single = YamlString::Plain("hello".to_string());
+        assert!(!plain_single.is_multiline());
+
+        let plain_multi = YamlString::Plain("hello\nworld".to_string());
+        assert!(plain_multi.is_multiline());
+
+        let literal = YamlString::Literal("hello".to_string());
+        assert!(literal.is_multiline());
+    }
+
+    #[test]
+    fn test_yaml_string_line_count() {
+        let single = YamlString::Plain("hello".to_string());
+        assert_eq!(single.line_count(), 1);
+
+        let multi = YamlString::Plain("hello\nworld\ntest".to_string());
+        assert_eq!(multi.line_count(), 3);
     }
 }
