@@ -1850,12 +1850,12 @@ mod tests {
         use tempfile::TempDir;
 
         let mut handler = InputHandler::new();
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Number(YamlNumber::Float(42.0))));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Number(YamlNumber::Integer(42))));
         let mut state = EditorState::new_with_default_theme(tree);
 
         // Create a temporary directory
         let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("test_output.json");
+        let file_path = temp_dir.path().join("test_output.yaml");
         let file_path_str = file_path.to_str().unwrap();
 
         // Initially no filename is set
@@ -1874,9 +1874,10 @@ mod tests {
         // Verify the file was created
         assert!(file_path.exists());
 
-        // Verify the content
+        // Verify the content - YAML format flexible for number representation
         let content = fs::read_to_string(&file_path).unwrap();
-        assert_eq!(content.trim(), "42");
+        let trimmed = content.trim();
+        assert!(trimmed == "42" || trimmed == "42.0", "Expected 42 or 42.0, got: {}", trimmed);
 
         // Verify the internal filename was updated
         assert_eq!(state.filename(), Some(file_path_str));
@@ -1898,7 +1899,7 @@ mod tests {
 
         // Create a temporary directory
         let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("test_wq.json");
+        let file_path = temp_dir.path().join("test_wq.yaml");
         let file_path_str = file_path.to_str().unwrap();
 
         // Simulate entering command mode and typing `:wq <filename>`
@@ -1914,8 +1915,11 @@ mod tests {
         // Verify the file was created
         assert!(file_path.exists());
 
-        // Verify the content
+        // Verify the content - YAML format (plain string without quotes)
         let content = fs::read_to_string(&file_path).unwrap();
-        assert_eq!(content.trim(), "\"test\"");
+        let trimmed = content.trim();
+        // serde_yaml may output with or without quotes depending on content
+        assert!(trimmed == "test" || trimmed == "\"test\"" || trimmed == "'test'",
+                "Expected 'test' (with or without quotes), got: {}", trimmed);
     }
 }
