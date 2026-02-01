@@ -81,12 +81,29 @@ pub enum YamlNumber {
     Float(f64),
 }
 
+impl std::fmt::Display for YamlNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            YamlNumber::Integer(i) => write!(f, "{}", i),
+            YamlNumber::Float(fl) => write!(f, "{}", fl),
+        }
+    }
+}
+
 impl YamlNumber {
     pub fn as_f64(&self) -> f64 {
         match self {
             YamlNumber::Integer(i) => *i as f64,
             YamlNumber::Float(f) => *f,
         }
+    }
+
+    pub fn is_integer(&self) -> bool {
+        matches!(self, YamlNumber::Integer(_))
+    }
+
+    pub fn is_float(&self) -> bool {
+        matches!(self, YamlNumber::Float(_))
     }
 }
 
@@ -373,5 +390,25 @@ mod text_span_tests {
 
         let multi = YamlString::Plain("hello\nworld\ntest".to_string());
         assert_eq!(multi.line_count(), 3);
+    }
+
+    #[test]
+    fn test_yaml_number_display() {
+        let int = YamlNumber::Integer(42);
+        assert_eq!(format!("{}", int), "42");
+
+        let float = YamlNumber::Float(42.5);
+        assert_eq!(format!("{}", float), "42.5");
+    }
+
+    #[test]
+    fn test_yaml_number_type_checks() {
+        let int = YamlNumber::Integer(42);
+        assert!(int.is_integer());
+        assert!(!int.is_float());
+
+        let float = YamlNumber::Float(42.0);
+        assert!(float.is_float());
+        assert!(!float.is_integer());
     }
 }
