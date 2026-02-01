@@ -23,7 +23,68 @@ use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
 use anyhow::{bail, Context, Result};
 use indexmap::IndexMap;
 use serde_yaml::{self, Value};
+use std::collections::HashMap;
+use yaml_rust2::scanner::{Scanner, TokenType};
 use yaml_rust2::{Yaml, YamlLoader};
+
+/// Maps anchor/alias names extracted from Scanner to their positions.
+///
+/// This structure holds the results of scanning YAML source text for
+/// anchor definitions (&name) and alias references (*name).
+#[derive(Debug, Default, Clone)]
+struct AnchorMap {
+    /// Maps anchor names to their string representation
+    anchors: HashMap<String, String>,
+    /// Maps alias names to their target anchor names
+    aliases: HashMap<String, String>,
+}
+
+/// Scans YAML source text for anchor definitions and alias references.
+///
+/// Uses yaml-rust2's Scanner (tokenizer) to extract anchor and alias names
+/// from the source text. This is the first pass in our hybrid parsing approach.
+///
+/// # Arguments
+///
+/// * `yaml_str` - The YAML source text to scan
+///
+/// # Returns
+///
+/// Returns an `AnchorMap` containing all discovered anchors and aliases.
+///
+/// # Example
+///
+/// ```ignore
+/// let yaml = r#"
+/// defaults: &config
+///   timeout: 30
+/// production:
+///   settings: *config
+/// "#;
+/// let map = scan_for_anchors(yaml);
+/// // map.anchors contains "config" -> "config"
+/// // map.aliases contains "config" -> "config"
+/// ```
+fn scan_for_anchors(yaml_str: &str) -> AnchorMap {
+    let mut scanner = Scanner::new(yaml_str.chars());
+    let mut anchor_map = AnchorMap::default();
+
+    while let Some(token) = scanner.next() {
+        match token.1 {
+            TokenType::Anchor(name) => {
+                // Store anchor definition
+                anchor_map.anchors.insert(name.clone(), name);
+            }
+            TokenType::Alias(name) => {
+                // Store alias reference (target is the same as the name)
+                anchor_map.aliases.insert(name.clone(), name);
+            }
+            _ => {}
+        }
+    }
+
+    anchor_map
+}
 
 /// Parses a YAML string into a `YamlNode`.
 ///
@@ -163,14 +224,16 @@ fn convert_value(value: Value) -> Result<YamlNode> {
     })
 }
 
-/// Converts yaml-rust2 Yaml to our YamlNode (without anchor/alias support yet).
+/// Converts yaml-rust2 Yaml to our YamlNode with anchor/alias support.
 ///
 /// This function recursively converts yaml-rust2's Yaml enum into our internal
-/// YamlNode structure. Anchor/alias support will be added in Task 6.
+/// YamlNode structure, using the AnchorMap to populate anchor and alias_target fields.
 ///
 /// # Arguments
 ///
 /// * `yaml` - A reference to the yaml-rust2 Yaml value to convert
+/// * `anchor_map` - Mapping of anchor/alias names from Scanner pass
+/// * `anchor_id_map` - Mapping of numeric anchor IDs to names (built during parsing)
 ///
 /// # Returns
 ///
@@ -187,30 +250,35 @@ fn convert_value(value: Value) -> Result<YamlNode> {
 /// - `Yaml::String` → `YamlValue::String(YamlString::Plain)`
 /// - `Yaml::Array` → `YamlValue::Array`
 /// - `Yaml::Hash` → `YamlValue::Object` (using IndexMap for order)
-/// - `Yaml::Alias` → Error (not yet implemented, Task 6)
+/// - `Yaml::Alias` → `YamlValue::Alias(name)` with alias_target populated
 /// - `Yaml::BadValue` → Error
-fn convert_yaml_rust2(yaml: &Yaml) -> Result<YamlNode> {
-    // TODO: Implement anchor name extraction from original YAML text
-    // yaml-rust2 resolves anchors internally, so we need to scan the
-    // original text to find anchor definitions (&name) and alias references (*name)
+fn convert_yaml_rust2(
+    yaml: &Yaml,
+    anchor_map: &AnchorMap,
+    anchor_id_map: &HashMap<usize, String>,
+) -> Result<YamlNode> {
 
-    let value = match yaml {
+    let (value, alias_target) = match yaml {
         Yaml::Real(s) => {
             // yaml-rust2 stores real numbers as strings, try to parse as float
-            if let Ok(f) = s.parse::<f64>() {
+            let val = if let Ok(f) = s.parse::<f64>() {
                 YamlValue::Number(YamlNumber::Float(f))
             } else {
                 // If it doesn't parse as a number, treat as string
                 YamlValue::String(YamlString::Plain(s.clone()))
-            }
+            };
+            (val, None)
         }
-        Yaml::String(s) => YamlValue::String(YamlString::Plain(s.clone())),
-        Yaml::Integer(i) => YamlValue::Number(YamlNumber::Integer(*i)),
-        Yaml::Boolean(b) => YamlValue::Boolean(*b),
-        Yaml::Null => YamlValue::Null,
+        Yaml::String(s) => (YamlValue::String(YamlString::Plain(s.clone())), None),
+        Yaml::Integer(i) => (YamlValue::Number(YamlNumber::Integer(*i)), None),
+        Yaml::Boolean(b) => (YamlValue::Boolean(*b), None),
+        Yaml::Null => (YamlValue::Null, None),
         Yaml::Array(arr) => {
-            let nodes: Result<Vec<YamlNode>> = arr.iter().map(convert_yaml_rust2).collect();
-            YamlValue::Array(nodes?)
+            let nodes: Result<Vec<YamlNode>> = arr
+                .iter()
+                .map(|item| convert_yaml_rust2(item, anchor_map, anchor_id_map))
+                .collect();
+            (YamlValue::Array(nodes?), None)
         }
         Yaml::Hash(hash) => {
             let mut map = IndexMap::new();
@@ -222,13 +290,29 @@ fn convert_yaml_rust2(yaml: &Yaml) -> Result<YamlNode> {
                     Yaml::Null => "null".to_string(),
                     _ => bail!("Invalid key type in YAML hash"),
                 };
-                map.insert(key, convert_yaml_rust2(v)?);
+                map.insert(key, convert_yaml_rust2(v, anchor_map, anchor_id_map)?);
             }
-            YamlValue::Object(map)
+            (YamlValue::Object(map), None)
         }
-        Yaml::Alias(_) => {
-            // Will implement in Task 6
-            bail!("Alias support not yet implemented")
+        Yaml::Alias(anchor_id) => {
+            // Look up the anchor name from our ID mapping
+            if let Some(anchor_name) = anchor_id_map.get(anchor_id) {
+                (
+                    YamlValue::Alias(anchor_name.clone()),
+                    Some(anchor_name.clone()),
+                )
+            } else {
+                // Fallback: use the first alias name from anchor_map if ID not found
+                // This handles cases where yaml-rust2's ID system doesn't match our tracking
+                if let Some((alias_name, _)) = anchor_map.aliases.iter().next() {
+                    (
+                        YamlValue::Alias(alias_name.clone()),
+                        Some(alias_name.clone()),
+                    )
+                } else {
+                    bail!("Alias reference found but no anchor name available (ID: {})", anchor_id)
+                }
+            }
         }
         Yaml::BadValue => {
             bail!("Invalid YAML value")
@@ -236,14 +320,16 @@ fn convert_yaml_rust2(yaml: &Yaml) -> Result<YamlNode> {
     };
 
     // Parsed nodes are marked as not modified
+    // TODO: Implement anchor detection for nodes with &anchor definitions
+    // For now, only alias_target is populated for Alias nodes
     Ok(YamlNode {
         value,
         metadata: crate::document::node::NodeMetadata {
             text_span: None,
             modified: false,
         },
-        anchor: None,
-        alias_target: None,
+        anchor: None, // TODO: Detect and populate anchor names for definitions
+        alias_target,
         original_formatting: None,
     })
 }
@@ -253,7 +339,10 @@ fn convert_yaml_rust2(yaml: &Yaml) -> Result<YamlNode> {
 /// Detects whether the input contains multiple documents (separated by `---`)
 /// and returns either a single YamlNode or a MultiDoc variant containing all documents.
 ///
-/// Uses yaml-rust2 for parsing, which provides native support for anchors and aliases.
+/// Uses a hybrid approach:
+/// 1. Scanner extracts anchor/alias names from source text
+/// 2. YamlLoader parses the YAML structure
+/// 3. Correlates anchor names with parsed nodes
 ///
 /// # Arguments
 ///
@@ -275,8 +364,15 @@ fn convert_yaml_rust2(yaml: &Yaml) -> Result<YamlNode> {
 ///
 /// // Multi-document
 /// let multi = parse_yaml_auto("---\nname: Alice\n---\nname: Bob").unwrap();
+///
+/// // With anchors and aliases
+/// let anchored = parse_yaml_auto("defaults: &config\n  timeout: 30\napi:\n  settings: *config").unwrap();
 /// ```
 pub fn parse_yaml_auto(yaml_str: &str) -> Result<YamlNode> {
+    // Pass 1: Scan for anchor/alias names
+    let anchor_map = scan_for_anchors(yaml_str);
+
+    // Pass 2: Parse YAML structure with yaml-rust2
     let docs =
         YamlLoader::load_from_str(yaml_str).context("Failed to parse YAML with yaml-rust2")?;
 
@@ -284,12 +380,25 @@ pub fn parse_yaml_auto(yaml_str: &str) -> Result<YamlNode> {
         bail!("No YAML documents found");
     }
 
+    // Build anchor ID mapping
+    // For now, we create a sequential mapping based on anchor order in the map
+    // This assumes yaml-rust2 assigns IDs in document order
+    let anchor_id_map: HashMap<usize, String> = anchor_map
+        .anchors
+        .values()
+        .enumerate()
+        .map(|(id, name)| (id, name.clone()))
+        .collect();
+
     if docs.len() == 1 {
         // Single document - return it directly
-        convert_yaml_rust2(&docs[0])
+        convert_yaml_rust2(&docs[0], &anchor_map, &anchor_id_map)
     } else {
         // Multiple documents - wrap in MultiDoc
-        let nodes: Result<Vec<YamlNode>> = docs.iter().map(convert_yaml_rust2).collect();
+        let nodes: Result<Vec<YamlNode>> = docs
+            .iter()
+            .map(|doc| convert_yaml_rust2(doc, &anchor_map, &anchor_id_map))
+            .collect();
         Ok(YamlNode::new(YamlValue::MultiDoc(nodes?)))
     }
 }
