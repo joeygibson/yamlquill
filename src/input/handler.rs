@@ -1877,7 +1877,11 @@ mod tests {
         // Verify the content - YAML format flexible for number representation
         let content = fs::read_to_string(&file_path).unwrap();
         let trimmed = content.trim();
-        assert!(trimmed == "42" || trimmed == "42.0", "Expected 42 or 42.0, got: {}", trimmed);
+        assert!(
+            trimmed == "42" || trimmed == "42.0",
+            "Expected 42 or 42.0, got: {}",
+            trimmed
+        );
 
         // Verify the internal filename was updated
         assert_eq!(state.filename(), Some(file_path_str));
@@ -1919,7 +1923,10 @@ mod tests {
         let content = fs::read_to_string(&file_path).unwrap();
         let trimmed = content.trim();
         // serde_yaml may output with or without quotes depending on content
-        assert!(trimmed == "test" || trimmed == "\"test\"" || trimmed == "'test'",
-                "Expected 'test' (with or without quotes), got: {}", trimmed);
+        assert!(
+            trimmed == "test" || trimmed == "\"test\"" || trimmed == "'test'",
+            "Expected 'test' (with or without quotes), got: {}",
+            trimmed
+        );
     }
 }

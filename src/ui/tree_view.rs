@@ -54,10 +54,10 @@ impl ValueType {
     /// # Example
     ///
     /// ```
-    /// use yamlquill::document::node::YamlValue;
+    /// use yamlquill::document::node::{YamlValue, YamlString};
     /// use yamlquill::ui::tree_view::ValueType;
     ///
-    /// let value = YamlValue::String("hello".to_string());
+    /// let value = YamlValue::String(YamlString::Plain("hello".to_string()));
     /// assert_eq!(ValueType::from_yaml_value(&value), ValueType::String);
     /// ```
     pub fn from_yaml_value(value: &YamlValue) -> Self {
@@ -83,13 +83,14 @@ impl ValueType {
 /// # Example
 ///
 /// ```
-/// use yamlquill::document::node::{YamlNode, YamlValue};
+/// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
 /// use yamlquill::document::tree::YamlTree;
 /// use yamlquill::ui::tree_view::TreeViewState;
+/// use indexmap::IndexMap;
 ///
-/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-///     ("name".to_string(), YamlNode::new(YamlValue::String("Alice".to_string()))),
-/// ])));
+/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+///     ("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string())))),
+/// ]))));
 ///
 /// let mut state = TreeViewState::new();
 /// state.rebuild(&tree);
@@ -500,20 +501,21 @@ use ratatui::{
 /// use yamlquill::ui::tree_view::{render_tree_view, TreeViewState};
 /// use yamlquill::editor::cursor::Cursor;
 /// use yamlquill::theme::colors::ThemeColors;
-/// use yamlquill::document::node::{YamlNode, YamlValue};
+/// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
 /// use yamlquill::document::tree::YamlTree;
 /// use ratatui::backend::TestBackend;
 /// use ratatui::Terminal;
 /// use ratatui::layout::Rect;
+/// use indexmap::IndexMap;
 ///
 /// let backend = TestBackend::new(80, 24);
 /// let mut terminal = Terminal::new(backend).unwrap();
 /// let colors = ThemeColors::default_dark();
 /// let cursor = Cursor::new();
 ///
-/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-///     ("name".to_string(), YamlNode::new(YamlValue::String("Alice".to_string()))),
-/// ])));
+/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+///     ("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string())))),
+/// ]))));
 /// let mut tree_view = TreeViewState::new();
 /// tree_view.rebuild(&tree);
 ///

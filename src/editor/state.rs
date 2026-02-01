@@ -20,11 +20,12 @@
 //! ```
 //! use yamlquill::editor::state::EditorState;
 //! use yamlquill::editor::mode::EditorMode;
-//! use yamlquill::document::node::{YamlNode, YamlValue};
+//! use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
 //! use yamlquill::document::tree::YamlTree;
+//! use indexmap::IndexMap;
 //!
 //! // Create an editor state with an empty object
-//! let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
+//! let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::new())));
 //! let mut state = EditorState::new_with_default_theme(tree);
 //!
 //! // Starts in Normal mode, not dirty
@@ -149,8 +150,9 @@ pub fn parse_scalar_value_for_test(input: &str) -> YamlValue {
 /// ```
 /// use yamlquill::editor::state::EditorState;
 /// use yamlquill::editor::mode::EditorMode;
-/// use yamlquill::document::node::{YamlNode, YamlValue};
+/// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
 /// use yamlquill::document::tree::YamlTree;
+/// use indexmap::IndexMap;
 ///
 /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
 /// let mut state = EditorState::new_with_default_theme(tree);
@@ -266,8 +268,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![])));
     /// let state = EditorState::new_with_default_theme(tree);
@@ -371,8 +374,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
@@ -392,10 +396,11 @@ impl EditorState {
     /// # Example
     ///
     /// ```
-    /// # use yamlquill::document::node::{YamlNode, YamlValue};
+    /// # use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// # use yamlquill::document::tree::YamlTree;
     /// # use yamlquill::editor::state::EditorState;
-    /// # let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
+    /// # use indexmap::IndexMap;
+    /// # let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::new())));
     /// # let mut state = EditorState::new_with_default_theme(tree);
     /// // Modify the tree
     /// let tree = state.tree_mut();
@@ -503,8 +508,9 @@ impl EditorState {
     /// ```
     /// use yamlquill::editor::state::EditorState;
     /// use yamlquill::editor::mode::EditorMode;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
@@ -526,8 +532,9 @@ impl EditorState {
     /// ```
     /// use yamlquill::editor::state::EditorState;
     /// use yamlquill::editor::mode::EditorMode;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
@@ -548,8 +555,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
@@ -569,8 +577,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
@@ -588,8 +597,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
@@ -608,8 +618,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
@@ -629,8 +640,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
@@ -651,8 +663,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
@@ -673,8 +686,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
@@ -692,8 +706,9 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let state = EditorState::new_with_default_theme(tree);
@@ -714,12 +729,13 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
     ///     ("key".to_string(), YamlNode::new(YamlValue::Null)),
-    /// ])));
+    /// ]))));;
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// state.tree_view_mut().toggle_expand(&[0]);
@@ -737,11 +753,12 @@ impl EditorState {
     /// # Example
     ///
     /// ```
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     /// use yamlquill::editor::state::EditorState;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::new())));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // After modifying the tree:
@@ -852,13 +869,14 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
-    /// ])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(2)))),
+    /// ]))));;
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // Initially at first line [0]
@@ -901,13 +919,14 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
-    /// ])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(2)))),
+    /// ]))));;
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // Move to second line
@@ -949,14 +968,15 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-    ///     ("user".to_string(), YamlNode::new(YamlValue::Object(vec![
-    ///         ("name".to_string(), YamlNode::new(YamlValue::String("Alice".to_string()))),
-    ///     ]))),
-    /// ])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///     ("user".to_string(), YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///         ("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string())))),
+    ///     ])))),
+    /// ]))));
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // Initially expanded (auto-expansion is default) - 2 lines
@@ -1283,14 +1303,15 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
-    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(3.0))),
-    /// ])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(2)))),
+    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(3)))),
+    /// ]))));;
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // Initially at first sibling [0]
@@ -1338,14 +1359,15 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
-    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(3.0))),
-    /// ])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(2)))),
+    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(3)))),
+    /// ]))));;
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // Move to middle sibling
@@ -1384,14 +1406,15 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
-    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(3.0))),
-    /// ])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(2)))),
+    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(3)))),
+    /// ]))));;
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // Initially at first sibling [0]
@@ -1450,14 +1473,15 @@ impl EditorState {
     ///
     /// ```
     /// use yamlquill::editor::state::EditorState;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// use yamlquill::document::tree::YamlTree;
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(2.0))),
-    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(3.0))),
-    /// ])));
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///     ("a".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+    ///     ("b".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(2)))),
+    ///     ("c".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(3)))),
+    /// ]))));;
     /// let mut state = EditorState::new_with_default_theme(tree);
     ///
     /// // Move to last sibling first
@@ -2067,13 +2091,13 @@ impl EditorState {
     /// # Examples
     ///
     /// ```
-    /// # use yamlquill::document::node::{YamlNode, YamlValue};
+    /// # use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     /// # use yamlquill::document::tree::YamlTree;
     /// # use yamlquill::editor::state::EditorState;
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-    ///     "key".to_string(),
-    ///     YamlNode::new(YamlValue::String("value".to_string())),
-    /// )])));
+    /// # use indexmap::IndexMap;
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+    ///     ("key".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string())))),
+    /// ]))));
     /// let mut state = EditorState::new_with_default_theme(tree);
     /// // Cursor starts at first visible line ("key")
     /// assert_eq!(state.get_current_path(), "key");

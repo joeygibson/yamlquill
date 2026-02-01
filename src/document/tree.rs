@@ -9,13 +9,14 @@
 //!
 //! ```
 //! use yamlquill::document::tree::YamlTree;
-//! use yamlquill::document::node::{YamlNode, YamlValue};
+//! use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
+//! use indexmap::IndexMap;
 //!
 //! // Create a simple tree
-//! let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-//!     ("name".to_string(), YamlNode::new(YamlValue::String("Alice".to_string()))),
-//!     ("age".to_string(), YamlNode::new(YamlValue::Number(30.0))),
-//! ])));
+//! let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
+//!     ("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string())))),
+//!     ("age".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(30)))),
+//! ]))));
 //!
 //! // Access the root
 //! assert!(tree.root().value().is_object());
@@ -24,7 +25,7 @@
 //! let path = vec![0];
 //! let child = tree.get_node(&path).unwrap();
 //! if let YamlValue::String(s) = child.value() {
-//!     assert_eq!(s, "Alice");
+//!     assert_eq!(s, &YamlString::Plain("Alice".to_string()));
 //! }
 //! ```
 
@@ -51,7 +52,7 @@ impl YamlTree {
     ///
     /// ```
     /// use yamlquill::document::tree::YamlTree;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     ///
     /// let root = YamlNode::new(YamlValue::Null);
     /// let tree = YamlTree::new(root);
@@ -84,7 +85,7 @@ impl YamlTree {
     ///
     /// ```
     /// use yamlquill::document::tree::YamlTree;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     ///
     /// let root = YamlNode::new(YamlValue::Boolean(true));
     /// let tree = YamlTree::new(root);
@@ -101,7 +102,7 @@ impl YamlTree {
     ///
     /// ```
     /// use yamlquill::document::tree::YamlTree;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     ///
     /// let root = YamlNode::new(YamlValue::Null);
     /// let mut tree = YamlTree::new(root);
@@ -127,19 +128,20 @@ impl YamlTree {
     ///
     /// ```
     /// use yamlquill::document::tree::YamlTree;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
+    /// use indexmap::IndexMap;
     ///
-    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
+    /// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::from([
     ///     ("items".to_string(), YamlNode::new(YamlValue::Array(vec![
-    ///         YamlNode::new(YamlValue::Number(1.0)),
-    ///         YamlNode::new(YamlValue::Number(2.0)),
+    ///         YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+    ///         YamlNode::new(YamlValue::Number(YamlNumber::Integer(2))),
     ///     ]))),
-    /// ])));
+    /// ]))));
     ///
     /// // Navigate to items[1]
     /// let path = vec![0, 1]; // First object field, second array element
     /// let node = tree.get_node(&path).unwrap();
-    /// assert!(matches!(node.value(), YamlValue::Number(2.0)));
+    /// assert!(matches!(node.value(), YamlValue::Number(YamlNumber::Integer(2))));
     ///
     /// // Invalid path
     /// let invalid_path = vec![0, 99];
@@ -177,22 +179,22 @@ impl YamlTree {
     ///
     /// ```
     /// use yamlquill::document::tree::YamlTree;
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
     ///
     /// let mut tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![
-    ///     YamlNode::new(YamlValue::String("old".to_string())),
+    ///     YamlNode::new(YamlValue::String(YamlString::Plain("old".to_string()))),
     /// ])));
     ///
     /// // Modify first array element
     /// let path = vec![0];
     /// if let Some(node) = tree.get_node_mut(&path) {
-    ///     *node.value_mut() = YamlValue::String("new".to_string());
+    ///     *node.value_mut() = YamlValue::String(YamlString::Plain("new".to_string()));
     /// }
     ///
     /// // Verify the change
     /// let node = tree.get_node(&path).unwrap();
     /// if let YamlValue::String(s) = node.value() {
-    ///     assert_eq!(s, "new");
+    ///     assert_eq!(s, &YamlString::Plain("new".to_string()));
     /// }
     /// ```
     pub fn get_node_mut(&mut self, path: &[usize]) -> Option<&mut YamlNode> {
@@ -415,9 +417,15 @@ mod tests {
 
         assert_eq!(tree.get_parent_path("$"), None);
         assert_eq!(tree.get_parent_path("name"), None);
-        assert_eq!(tree.get_parent_path("config.timeout"), Some("config".to_string()));
+        assert_eq!(
+            tree.get_parent_path("config.timeout"),
+            Some("config".to_string())
+        );
         assert_eq!(tree.get_parent_path("users[0]"), Some("users".to_string()));
-        assert_eq!(tree.get_parent_path("users[0].name"), Some("users[0]".to_string()));
+        assert_eq!(
+            tree.get_parent_path("users[0].name"),
+            Some("users[0]".to_string())
+        );
     }
 
     #[test]
