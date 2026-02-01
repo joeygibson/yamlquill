@@ -1,66 +1,103 @@
-//! JSON file saving functionality.
+//! YAML file saving functionality.
 //!
 //! This module provides functions to save `YamlTree` structures to files with
 //! atomic write operations and optional backup creation.
 
 use crate::config::Config;
-use crate::document::node::{YamlNode, YamlValue};
+use crate::document::node::{YamlNode, YamlValue, YamlNumber};
 use crate::document::tree::YamlTree;
 use anyhow::{Context, Result};
+use serde_yaml::Value;
 use std::fs;
 use std::path::Path;
 
-/// Saves a JSON tree to a file with optional backup creation.
+/// Converts a YamlNode tree to a serde_yaml::Value.
 ///
-/// This function serializes a `YamlTree` to JSON format and writes it to the
-/// specified file path. The write operation is atomic (writes to a temp file
-/// then renames) to prevent data loss on crashes. Optionally creates a backup
-/// of the original file before writing.
-///
-/// For multi-document YAML documents (YamlValue::MultiDoc), saves in line-by-line format.
+/// This function recursively traverses the YamlNode structure and converts
+/// it to serde_yaml::Value for serialization.
 ///
 /// # Arguments
 ///
-/// * `path` - The path where the JSON file should be saved
-/// * `tree` - The JSON tree to serialize and save
-/// * `config` - Configuration including indentation and backup settings
+/// * `node` - The YamlNode to convert
 ///
 /// # Returns
 ///
 /// Returns a `Result` containing:
-/// - `Ok(())` if the file was successfully saved
-/// - `Err(anyhow::Error)` if:
-///   - Creating a backup failed
-///   - Writing the temp file failed
-///   - Renaming the temp file to the target failed
+/// - `Ok(Value)` with the converted value
+/// - `Err(anyhow::Error)` if the node type is not supported (Alias or MultiDoc)
 ///
-/// # Examples
+/// # Type Conversions
 ///
-/// ```no_run
-/// use yamlquill::file::saver::save_yaml_file;
-/// use yamlquill::document::node::{YamlNode, YamlValue};
-/// use yamlquill::document::tree::YamlTree;
-/// use yamlquill::config::Config;
+/// - `YamlValue::Null` → `Value::Null`
+/// - `YamlValue::Boolean` → `Value::Bool`
+/// - `YamlValue::Number` → `Value::Number` (preserves Integer vs Float)
+/// - `YamlValue::String` → `Value::String` (always plain in v1)
+/// - `YamlValue::Array` → `Value::Sequence`
+/// - `YamlValue::Object` → `Value::Mapping`
+/// - `YamlValue::Alias` → Error (not supported in v1)
+/// - `YamlValue::MultiDoc` → Error (not supported in v1)
 ///
-/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
-/// let config = Config::default();
-/// save_yaml_file("output.json", &tree, &config).unwrap();
-/// ```
+/// # V1 Limitations
 ///
-/// # Errors
-///
-/// This function will return an error if:
-/// - Backup creation fails (if requested)
-/// - Writing to the temp file fails
-/// - Renaming the temp file to the target fails
-///
-/// # Atomic Write
-///
-/// This function uses an atomic write strategy:
-/// 1. Serializes the JSON to a temporary file
-/// 2. Renames the temporary file to the target path
-///
-/// This ensures that the target file is never left in a partially written state.
+/// - Alias nodes return an error (Phase 3 will add support)
+/// - MultiDoc nodes return an error (use save_yamll instead)
+/// - All strings output as plain style (Phase 4 will preserve literal/folded)
+fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
+    let value = match node.value() {
+        YamlValue::Null => Value::Null,
+
+        YamlValue::Boolean(b) => Value::Bool(*b),
+
+        YamlValue::Number(n) => {
+            match n {
+                YamlNumber::Integer(i) => {
+                    Value::Number(serde_yaml::Number::from(*i))
+                }
+                YamlNumber::Float(f) => {
+                    // serde_yaml::Number doesn't have a direct from_f64
+                    // We need to serialize to f64 via serde_json compatibility
+                    serde_yaml::to_value(f).context("Failed to convert float to YAML value")?
+                }
+            }
+        }
+
+        YamlValue::String(s) => {
+            // V1: Always output as plain string
+            // Phase 4 will preserve literal (|) and folded (>) styles
+            Value::String(s.as_str().to_string())
+        }
+
+        YamlValue::Array(elements) => {
+            let seq: Result<Vec<Value>> = elements
+                .iter()
+                .map(convert_to_serde_value)
+                .collect();
+            Value::Sequence(seq?)
+        }
+
+        YamlValue::Object(entries) => {
+            let mut map = serde_yaml::Mapping::new();
+            for (key, value) in entries {
+                map.insert(
+                    Value::String(key.clone()),
+                    convert_to_serde_value(value)?
+                );
+            }
+            Value::Mapping(map)
+        }
+
+        YamlValue::Alias(name) => {
+            anyhow::bail!("Cannot serialize Alias nodes in v1 (alias: *{})", name)
+        }
+
+        YamlValue::MultiDoc(_) => {
+            anyhow::bail!("Cannot serialize MultiDoc nodes - use save_yamll instead")
+        }
+    };
+
+    Ok(value)
+}
+
 /// Creates a backup of a file by copying it with a .bak extension.
 fn create_backup<P: AsRef<Path>>(path: P) -> Result<()> {
     let path = path.as_ref();
@@ -74,6 +111,57 @@ fn create_backup<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
+/// Saves a YAML tree to a file with optional backup creation.
+///
+/// This function serializes a `YamlTree` to YAML format and writes it to the
+/// specified file path. The write operation is atomic (writes to a temp file
+/// then renames) to prevent data loss on crashes. Optionally creates a backup
+/// of the original file before writing.
+///
+/// For multi-document YAML documents (YamlValue::MultiDoc), automatically uses
+/// line-by-line format via save_yamll.
+///
+/// # Arguments
+///
+/// * `path` - The path where the YAML file should be saved
+/// * `tree` - The YAML tree to serialize and save
+/// * `config` - Configuration including backup settings
+///
+/// # Returns
+///
+/// Returns a `Result` containing:
+/// - `Ok(())` if the file was successfully saved
+/// - `Err(anyhow::Error)` if:
+///   - Creating a backup failed
+///   - Serialization failed
+///   - Writing the temp file failed
+///   - Renaming the temp file to the target failed
+///
+/// # Examples
+///
+/// ```no_run
+/// use yamlquill::file::saver::save_yaml_file;
+/// use yamlquill::document::node::{YamlNode, YamlValue};
+/// use yamlquill::document::tree::YamlTree;
+/// use yamlquill::config::Config;
+/// use indexmap::IndexMap;
+///
+/// let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::new())));
+/// let config = Config::default();
+/// save_yaml_file("output.yaml", &tree, &config).unwrap();
+/// ```
+///
+/// # Atomic Write
+///
+/// This function uses an atomic write strategy:
+/// 1. Serializes the YAML to a temporary file
+/// 2. Renames the temporary file to the target path
+///
+/// This ensures that the target file is never left in a partially written state.
+///
+/// # Gzip Compression
+///
+/// If the path ends with `.gz`, the file will be automatically compressed with gzip.
 pub fn save_yaml_file<P: AsRef<Path>>(path: P, tree: &YamlTree, config: &Config) -> Result<()> {
     let path = path.as_ref();
 
@@ -90,25 +178,12 @@ pub fn save_yaml_file<P: AsRef<Path>>(path: P, tree: &YamlTree, config: &Config)
         create_backup(path)?;
     }
 
-    // Serialize with format preservation if original source is available
-    let mut yaml_str = if let Some(original) = tree.original_source() {
-        serialize_preserving_format(tree.root(), original, config, 0)
-    } else {
-        // No original source, use standard serialization
-        serialize_node(tree.root(), config.indent_size, 0)
-    };
+    // Convert YamlNode to serde_yaml::Value
+    let value = convert_to_serde_value(tree.root())?;
 
-    // Preserve trailing newline from original if present
-    if let Some(original) = tree.original_source() {
-        if original.ends_with('\n') && !yaml_str.ends_with('\n') {
-            yaml_str.push('\n');
-        }
-    }
-
-    // Validate the serialized JSON before writing to disk
-    // This catches serialization bugs before they corrupt user data
-    serde_yaml::from_str::<serde_yaml::Value>(&yaml_str)
-        .context("Generated invalid YAML - this is a bug in yamlquill's serialization")?;
+    // Serialize to YAML string
+    let yaml_str = serde_yaml::to_string(&value)
+        .context("Failed to serialize YAML")?;
 
     // Write atomically (compressed or uncompressed)
     write_file_atomic(path, yaml_str.as_bytes(), should_compress)?;
@@ -163,7 +238,7 @@ fn write_file_atomic<P: AsRef<Path>>(path: P, data: &[u8], compress: bool) -> Re
 
 /// Saves a multi-document YAML document to a file.
 ///
-/// Each line is saved as a separate JSON object (one per line).
+/// Each line is saved as a separate YAML object (one per line).
 fn save_yamll<P: AsRef<Path>>(
     path: P,
     tree: &YamlTree,
@@ -181,18 +256,26 @@ fn save_yamll<P: AsRef<Path>>(
 
     if let YamlValue::MultiDoc(lines) = tree.root().value() {
         for (i, node) in lines.iter().enumerate() {
-            // multi-document YAML requires compact single-line JSON
-            let line = serialize_node_compact(node);
+            // Convert to serde_yaml::Value
+            let value = convert_to_serde_value(node)
+                .with_context(|| format!("Failed to convert line {} to YAML", i + 1))?;
+
+            // Serialize to compact single-line YAML (JSON style)
+            let line = serde_yaml::to_string(&value)
+                .with_context(|| format!("Failed to serialize line {}", i + 1))?;
+
+            // Remove trailing newline from serde_yaml output
+            let line = line.trim_end();
 
             // Validate each line is valid YAML
-            serde_yaml::from_str::<serde_yaml::Value>(&line).with_context(|| {
+            serde_yaml::from_str::<serde_yaml::Value>(line).with_context(|| {
                 format!(
                     "Generated invalid YAML at line {} - this is a bug in yamlquill's serialization",
                     i + 1
                 )
             })?;
 
-            output.push_str(&line);
+            output.push_str(line);
             output.push('\n');
         }
     }
@@ -237,7 +320,7 @@ fn serialize_preserving_format(
 
 /// Serializes an object with format preservation for children.
 fn serialize_object_preserving(
-    entries: &[(String, YamlNode)],
+    entries: &indexmap::IndexMap<String, YamlNode>,
     original: &str,
     config: &Config,
     depth: usize,
@@ -331,17 +414,23 @@ pub fn serialize_node_compact(node: &YamlNode) -> String {
             let parts: Vec<String> = elements.iter().map(serialize_node_compact).collect();
             format!("[{}]", parts.join(","))
         }
-        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s)),
+        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s.as_str())),
         YamlValue::Number(n) => {
             // Format numbers cleanly - remove unnecessary decimal points
-            if n.fract() == 0.0 && n.is_finite() {
-                format!("{:.0}", n)
-            } else {
-                n.to_string()
+            match n {
+                YamlNumber::Integer(i) => i.to_string(),
+                YamlNumber::Float(f) => {
+                    if f.fract() == 0.0 && f.is_finite() {
+                        format!("{:.0}", f)
+                    } else {
+                        f.to_string()
+                    }
+                }
             }
         }
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
+        YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
     }
 }
 
@@ -416,16 +505,22 @@ pub fn serialize_node_jq_style(
             result.push(']');
             result
         }
-        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s)),
+        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s.as_str())),
         YamlValue::Number(n) => {
-            if n.fract() == 0.0 && n.is_finite() {
-                format!("{:.0}", n)
-            } else {
-                n.to_string()
+            match n {
+                YamlNumber::Integer(i) => i.to_string(),
+                YamlNumber::Float(f) => {
+                    if f.fract() == 0.0 && f.is_finite() {
+                        format!("{:.0}", f)
+                    } else {
+                        f.to_string()
+                    }
+                }
             }
         }
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
+        YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
     }
 }
 
@@ -507,25 +602,31 @@ pub fn serialize_node(node: &YamlNode, indent_size: usize, current_depth: usize)
             result.push(']');
             result
         }
-        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s)),
+        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s.as_str())),
         YamlValue::Number(n) => {
             // Format numbers cleanly - remove unnecessary decimal points
-            if n.fract() == 0.0 && n.is_finite() {
-                format!("{:.0}", n)
-            } else {
-                n.to_string()
+            match n {
+                YamlNumber::Integer(i) => i.to_string(),
+                YamlNumber::Float(f) => {
+                    if f.fract() == 0.0 && f.is_finite() {
+                        format!("{:.0}", f)
+                    } else {
+                        f.to_string()
+                    }
+                }
             }
         }
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
+        YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
     }
 }
 
 /// Checks if an object should use compact (single-line) formatting.
 ///
 /// Returns true if all values in the object are scalar (not containers).
-fn should_use_compact_format_object(entries: &[(String, YamlNode)]) -> bool {
-    entries.iter().all(|(_, node)| !node.value().is_container())
+fn should_use_compact_format_object(entries: &indexmap::IndexMap<String, YamlNode>) -> bool {
+    entries.values().all(|node| !node.value().is_container())
 }
 
 /// Checks if an array should use compact (single-line) formatting.
@@ -538,7 +639,7 @@ fn should_use_compact_format_array(elements: &[YamlNode]) -> bool {
 /// Serializes an object in compact (single-line) format.
 ///
 /// Example: `{"a": 1, "b": "hello", "c": true}`
-fn serialize_object_compact(entries: &[(String, YamlNode)]) -> String {
+fn serialize_object_compact(entries: &indexmap::IndexMap<String, YamlNode>) -> String {
     let parts: Vec<String> = entries
         .iter()
         .map(|(key, value)| {
@@ -568,12 +669,17 @@ fn serialize_array_compact(elements: &[YamlNode]) -> String {
 /// This is a simplified version of serialize_node for scalar values only.
 fn serialize_scalar(value: &YamlValue) -> String {
     match value {
-        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s)),
+        YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s.as_str())),
         YamlValue::Number(n) => {
-            if n.fract() == 0.0 && n.is_finite() {
-                format!("{:.0}", n)
-            } else {
-                n.to_string()
+            match n {
+                YamlNumber::Integer(i) => i.to_string(),
+                YamlNumber::Float(f) => {
+                    if f.fract() == 0.0 && f.is_finite() {
+                        format!("{:.0}", f)
+                    } else {
+                        f.to_string()
+                    }
+                }
             }
         }
         YamlValue::Boolean(b) => b.to_string(),
