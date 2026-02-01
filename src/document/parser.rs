@@ -158,6 +158,7 @@ fn convert_value(value: Value) -> Result<YamlNode> {
             modified: false,
         },
         anchor: None,
+        alias_target: None,
         original_formatting: None,
     })
 }
@@ -254,6 +255,7 @@ pub fn parse_value(value: &Value) -> YamlNode {
             modified: false,
         },
         anchor: None,
+        alias_target: None,
         original_formatting: None,
     })
 }
