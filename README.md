@@ -127,9 +127,9 @@ yamlquill data.yaml.gz
 curl https://api.example.com/data.yaml.gz | gunzip | yamlquill
 ```
 
-### Multi-Document YAML Support (Planned - Phase 3)
+### Multi-Document YAML Support ✅
 
-YAMLQuill will support multi-document YAML files with `---` separators:
+YAMLQuill supports multi-document YAML files with `---` separators:
 
 ```bash
 # Open a multi-document YAML file
@@ -467,13 +467,12 @@ enable_mouse = true
 lazy_load_threshold = 104857600
 
 # Preserve original formatting for unmodified nodes (default: true)
-# Phase 4 feature - not yet implemented
 preserve_formatting = true
 ```
 
-### Format Preservation (Planned - Phase 4)
+### Format Preservation ✅
 
-YAMLQuill will preserve the original formatting of unmodified YAML nodes when saving files. This means:
+YAMLQuill preserves the original formatting of unmodified YAML nodes when saving files. This means:
 - Nodes you don't edit keep their exact original whitespace, indentation, and newlines
 - Multi-line strings preserve their style (literal `|` or folded `>`)
 - Only modified nodes are reformatted according to your indent settings
@@ -527,12 +526,12 @@ cargo test -- --nocapture
 YAMLQuill development follows a phased approach:
 
 - **Phase 1** ✅ Core structure (complete)
-- **Phase 2** ⏳ YAML document model
-- **Phase 3** ⏳ Multi-document support
-- **Phase 4** ⏳ YAML-specific features (anchors, multi-line strings)
-- **Phase 5** ⏳ Polish & feature parity with JSONQuill
+- **Phase 2** ✅ YAML document model (complete)
+- **Phase 3** ✅ Multi-document support (complete)
+- **Phase 4** ⏸️ YAML-specific features (deferred to v2.0 - requires custom parser)
+- **Phase 5** ✅ Polish & feature parity with JSONQuill (complete)
 
-See [CLAUDE.md](CLAUDE.md) for detailed development documentation.
+**v1.0 is feature-complete!** See [CLAUDE.md](CLAUDE.md) for detailed development documentation.
 
 ### Version Management
 
