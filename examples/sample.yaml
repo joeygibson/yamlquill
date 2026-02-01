@@ -1,0 +1,11 @@
+name: Test Document
+version: 1.0
+config:
+  timeout: 30
+  retry: 3
+  enabled: true
+users:
+  - name: Alice
+    age: 30
+  - name: Bob
+    age: 25
