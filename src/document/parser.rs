@@ -1,7 +1,7 @@
 //! YAML parsing with metadata preservation.
 //!
 //! This module provides functionality to parse YAML strings into `YamlNode` structures
-//! using serde_yaml. The parser converts standard YAML into our internal representation
+//! using yaml-rust2. The parser converts standard YAML into our internal representation
 //! that tracks modification status for format-preserving edits.
 //!
 //! # Phase 1 Scope
@@ -20,10 +20,10 @@
 //! ```
 
 use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use indexmap::IndexMap;
-use serde::Deserialize;
 use serde_yaml::{self, Value};
+use yaml_rust2::{Yaml, YamlLoader};
 
 /// Parses a YAML string into a `YamlNode`.
 ///
@@ -163,10 +163,93 @@ fn convert_value(value: Value) -> Result<YamlNode> {
     })
 }
 
+/// Converts yaml-rust2 Yaml to our YamlNode (without anchor/alias support yet).
+///
+/// This function recursively converts yaml-rust2's Yaml enum into our internal
+/// YamlNode structure. Anchor/alias support will be added in Task 6.
+///
+/// # Arguments
+///
+/// * `yaml` - A reference to the yaml-rust2 Yaml value to convert
+///
+/// # Returns
+///
+/// Returns a `Result` containing:
+/// - `Ok(YamlNode)` with the converted value
+/// - `Err(anyhow::Error)` if conversion fails
+///
+/// # Type Conversions
+///
+/// - `Yaml::Null` → `YamlValue::Null`
+/// - `Yaml::Boolean` → `YamlValue::Boolean`
+/// - `Yaml::Integer` → `YamlValue::Number(YamlNumber::Integer)`
+/// - `Yaml::Real` → `YamlValue::String(YamlString::Plain)` (real numbers stored as strings in yaml-rust2)
+/// - `Yaml::String` → `YamlValue::String(YamlString::Plain)`
+/// - `Yaml::Array` → `YamlValue::Array`
+/// - `Yaml::Hash` → `YamlValue::Object` (using IndexMap for order)
+/// - `Yaml::Alias` → Error (not yet implemented, Task 6)
+/// - `Yaml::BadValue` → Error
+fn convert_yaml_rust2(yaml: &Yaml) -> Result<YamlNode> {
+    let value = match yaml {
+        Yaml::Real(s) => {
+            // yaml-rust2 stores real numbers as strings, try to parse as float
+            if let Ok(f) = s.parse::<f64>() {
+                YamlValue::Number(YamlNumber::Float(f))
+            } else {
+                // If it doesn't parse as a number, treat as string
+                YamlValue::String(YamlString::Plain(s.clone()))
+            }
+        }
+        Yaml::String(s) => YamlValue::String(YamlString::Plain(s.clone())),
+        Yaml::Integer(i) => YamlValue::Number(YamlNumber::Integer(*i)),
+        Yaml::Boolean(b) => YamlValue::Boolean(*b),
+        Yaml::Null => YamlValue::Null,
+        Yaml::Array(arr) => {
+            let nodes: Result<Vec<YamlNode>> = arr.iter().map(convert_yaml_rust2).collect();
+            YamlValue::Array(nodes?)
+        }
+        Yaml::Hash(hash) => {
+            let mut map = IndexMap::new();
+            for (k, v) in hash.iter() {
+                let key = match k {
+                    Yaml::String(s) => s.clone(),
+                    Yaml::Integer(i) => i.to_string(),
+                    Yaml::Boolean(b) => b.to_string(),
+                    Yaml::Null => "null".to_string(),
+                    _ => bail!("Invalid key type in YAML hash"),
+                };
+                map.insert(key, convert_yaml_rust2(v)?);
+            }
+            YamlValue::Object(map)
+        }
+        Yaml::Alias(_) => {
+            // Will implement in Task 6
+            bail!("Alias support not yet implemented")
+        }
+        Yaml::BadValue => {
+            bail!("Invalid YAML value")
+        }
+    };
+
+    // Parsed nodes are marked as not modified
+    Ok(YamlNode {
+        value,
+        metadata: crate::document::node::NodeMetadata {
+            text_span: None,
+            modified: false,
+        },
+        anchor: None,
+        alias_target: None,
+        original_formatting: None,
+    })
+}
+
 /// Parses YAML with automatic single/multi-document detection.
 ///
 /// Detects whether the input contains multiple documents (separated by `---`)
 /// and returns either a single YamlNode or a MultiDoc variant containing all documents.
+///
+/// Uses yaml-rust2 for parsing, which provides native support for anchors and aliases.
 ///
 /// # Arguments
 ///
@@ -190,48 +273,21 @@ fn convert_value(value: Value) -> Result<YamlNode> {
 /// let multi = parse_yaml_auto("---\nname: Alice\n---\nname: Bob").unwrap();
 /// ```
 pub fn parse_yaml_auto(yaml_str: &str) -> Result<YamlNode> {
-    // Try to parse as multi-document first
-    let documents = parse_yaml_multi_doc(yaml_str)?;
+    let docs =
+        YamlLoader::load_from_str(yaml_str).context("Failed to parse YAML with yaml-rust2")?;
 
-    if documents.len() == 1 {
+    if docs.is_empty() {
+        bail!("No YAML documents found");
+    }
+
+    if docs.len() == 1 {
         // Single document - return it directly
-        Ok(documents.into_iter().next().unwrap())
+        convert_yaml_rust2(&docs[0])
     } else {
         // Multiple documents - wrap in MultiDoc
-        Ok(YamlNode::new(YamlValue::MultiDoc(documents)))
+        let nodes: Result<Vec<YamlNode>> = docs.iter().map(convert_yaml_rust2).collect();
+        Ok(YamlNode::new(YamlValue::MultiDoc(nodes?)))
     }
-}
-
-/// Parses YAML that may contain multiple documents separated by `---`.
-///
-/// Returns a Vec of YamlNodes, one for each document. For single-document
-/// YAML, returns a Vec with one element.
-///
-/// # Arguments
-///
-/// * `yaml_str` - A string slice containing valid YAML
-///
-/// # Returns
-///
-/// Returns a `Result` containing:
-/// - `Ok(Vec<YamlNode>)` with all parsed documents
-/// - `Err(anyhow::Error)` if the YAML is malformed
-fn parse_yaml_multi_doc(yaml_str: &str) -> Result<Vec<YamlNode>> {
-    let mut documents = Vec::new();
-
-    // Use serde_yaml's Deserializer to handle multiple documents
-    for document in serde_yaml::Deserializer::from_str(yaml_str) {
-        let value = Value::deserialize(document).context("Failed to deserialize YAML document")?;
-        let node = convert_value(value)?;
-        documents.push(node);
-    }
-
-    // If no documents were parsed, return an error
-    if documents.is_empty() {
-        anyhow::bail!("No valid YAML documents found");
-    }
-
-    Ok(documents)
 }
 
 /// Converts a `serde_yaml::Value` reference into a `YamlNode`.
