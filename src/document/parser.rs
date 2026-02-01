@@ -25,8 +25,7 @@ use indexmap::IndexMap;
 use serde_yaml::{self, Value};
 use std::collections::HashMap;
 use yaml_rust2::parser::{Event, EventReceiver, Parser};
-use yaml_rust2::scanner::{Scanner, TScalarStyle, TokenType};
-use yaml_rust2::{Yaml, YamlLoader};
+use yaml_rust2::scanner::{Scanner, TokenType};
 
 /// Maps anchor/alias names extracted from Scanner to their positions.
 ///
@@ -85,10 +84,10 @@ impl AnchorMap {
 /// // map.aliases contains "config" -> "config"
 /// ```
 fn scan_for_anchors(yaml_str: &str) -> AnchorMap {
-    let mut scanner = Scanner::new(yaml_str.chars());
+    let scanner = Scanner::new(yaml_str.chars());
     let mut anchor_map = AnchorMap::default();
 
-    while let Some(token) = scanner.next() {
+    for token in scanner {
         match token.1 {
             TokenType::Anchor(name) => {
                 // Store anchor definition
@@ -116,8 +115,6 @@ struct TreeBuilder {
     anchor_map: AnchorMap,
     /// All completed document root nodes
     documents: Vec<YamlNode>,
-    /// Current key for the next value in a mapping (unused, kept for compatibility)
-    current_key: Option<String>,
 }
 
 /// Represents a node being built (may be incomplete)
@@ -141,7 +138,6 @@ impl TreeBuilder {
             stack: Vec::new(),
             anchor_map,
             documents: Vec::new(),
-            current_key: None, // Unused, kept for compatibility
         }
     }
 
@@ -197,7 +193,8 @@ impl EventReceiver for TreeBuilder {
 
             Event::Alias(anchor_id) => {
                 // Create an Alias node
-                let anchor_name = self.get_anchor_name(anchor_id)
+                let anchor_name = self
+                    .get_anchor_name(anchor_id)
                     .unwrap_or_else(|| format!("unknown_{}", anchor_id));
 
                 let node = YamlNode {
@@ -214,7 +211,7 @@ impl EventReceiver for TreeBuilder {
                 self.push_value(node);
             }
 
-            Event::Scalar(value, style, anchor_id, _tag) => {
+            Event::Scalar(value, _style, anchor_id, _tag) => {
                 // In a mapping context, scalars alternate between keys and values
                 if let Some(BuildNode::Mapping { current_key, .. }) = self.stack.last_mut() {
                     if current_key.is_none() {
@@ -451,116 +448,6 @@ fn convert_value(value: Value) -> Result<YamlNode> {
         },
         anchor: None,
         alias_target: None,
-        original_formatting: None,
-    })
-}
-
-/// Converts yaml-rust2 Yaml to our YamlNode with anchor/alias support.
-///
-/// This function recursively converts yaml-rust2's Yaml enum into our internal
-/// YamlNode structure, using the AnchorMap to populate anchor and alias_target fields.
-///
-/// # Arguments
-///
-/// * `yaml` - A reference to the yaml-rust2 Yaml value to convert
-/// * `anchor_map` - Mapping of anchor/alias names from Scanner pass
-/// * `anchor_id_map` - Mapping of numeric anchor IDs to names (built during parsing)
-///
-/// # Returns
-///
-/// Returns a `Result` containing:
-/// - `Ok(YamlNode)` with the converted value
-/// - `Err(anyhow::Error)` if conversion fails
-///
-/// # Type Conversions
-///
-/// - `Yaml::Null` → `YamlValue::Null`
-/// - `Yaml::Boolean` → `YamlValue::Boolean`
-/// - `Yaml::Integer` → `YamlValue::Number(YamlNumber::Integer)`
-/// - `Yaml::Real` → `YamlValue::String(YamlString::Plain)` (real numbers stored as strings in yaml-rust2)
-/// - `Yaml::String` → `YamlValue::String(YamlString::Plain)`
-/// - `Yaml::Array` → `YamlValue::Array`
-/// - `Yaml::Hash` → `YamlValue::Object` (using IndexMap for order)
-/// - `Yaml::Alias` → `YamlValue::Alias(name)` with alias_target populated
-/// - `Yaml::BadValue` → Error
-fn convert_yaml_rust2(
-    yaml: &Yaml,
-    anchor_map: &AnchorMap,
-    anchor_id_map: &HashMap<usize, String>,
-) -> Result<YamlNode> {
-
-    let (value, alias_target) = match yaml {
-        Yaml::Real(s) => {
-            // yaml-rust2 stores real numbers as strings, try to parse as float
-            let val = if let Ok(f) = s.parse::<f64>() {
-                YamlValue::Number(YamlNumber::Float(f))
-            } else {
-                // If it doesn't parse as a number, treat as string
-                YamlValue::String(YamlString::Plain(s.clone()))
-            };
-            (val, None)
-        }
-        Yaml::String(s) => (YamlValue::String(YamlString::Plain(s.clone())), None),
-        Yaml::Integer(i) => (YamlValue::Number(YamlNumber::Integer(*i)), None),
-        Yaml::Boolean(b) => (YamlValue::Boolean(*b), None),
-        Yaml::Null => (YamlValue::Null, None),
-        Yaml::Array(arr) => {
-            let nodes: Result<Vec<YamlNode>> = arr
-                .iter()
-                .map(|item| convert_yaml_rust2(item, anchor_map, anchor_id_map))
-                .collect();
-            (YamlValue::Array(nodes?), None)
-        }
-        Yaml::Hash(hash) => {
-            let mut map = IndexMap::new();
-            for (k, v) in hash.iter() {
-                let key = match k {
-                    Yaml::String(s) => s.clone(),
-                    Yaml::Integer(i) => i.to_string(),
-                    Yaml::Boolean(b) => b.to_string(),
-                    Yaml::Null => "null".to_string(),
-                    _ => bail!("Invalid key type in YAML hash"),
-                };
-                map.insert(key, convert_yaml_rust2(v, anchor_map, anchor_id_map)?);
-            }
-            (YamlValue::Object(map), None)
-        }
-        Yaml::Alias(anchor_id) => {
-            // Look up the anchor name from our ID mapping
-            if let Some(anchor_name) = anchor_id_map.get(anchor_id) {
-                (
-                    YamlValue::Alias(anchor_name.clone()),
-                    Some(anchor_name.clone()),
-                )
-            } else {
-                // Fallback: use the first alias name from anchor_map if ID not found
-                // This handles cases where yaml-rust2's ID system doesn't match our tracking
-                if let Some((alias_name, _)) = anchor_map.aliases.iter().next() {
-                    (
-                        YamlValue::Alias(alias_name.clone()),
-                        Some(alias_name.clone()),
-                    )
-                } else {
-                    bail!("Alias reference found but no anchor name available (ID: {})", anchor_id)
-                }
-            }
-        }
-        Yaml::BadValue => {
-            bail!("Invalid YAML value")
-        }
-    };
-
-    // Parsed nodes are marked as not modified
-    // TODO: Implement anchor detection for nodes with &anchor definitions
-    // For now, only alias_target is populated for Alias nodes
-    Ok(YamlNode {
-        value,
-        metadata: crate::document::node::NodeMetadata {
-            text_span: None,
-            modified: false,
-        },
-        anchor: None, // TODO: Detect and populate anchor names for definitions
-        alias_target,
         original_formatting: None,
     })
 }

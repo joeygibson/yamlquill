@@ -3,8 +3,8 @@
 //! These tests validate the hybrid parsing approach that uses Scanner
 //! to extract anchor/alias names and correlates them with the parsed tree.
 
+use yamlquill::document::node::{YamlNumber, YamlString, YamlValue};
 use yamlquill::document::parser::parse_yaml_auto;
-use yamlquill::document::node::{YamlValue, YamlString, YamlNumber};
 
 #[test]
 fn test_parse_yaml_without_anchors() {
@@ -146,7 +146,7 @@ services:
                         _ => panic!("Expected object for api"),
                     }
 
-                    // Check worker service  
+                    // Check worker service
                     let worker = services_map.get("worker").unwrap();
                     match worker.value() {
                         YamlValue::Object(worker_map) => {
@@ -228,7 +228,7 @@ production:
 
     println!("\n=== DEBUG: Root Node ===");
     println!("Value type: {:?}", std::mem::discriminant(node.value()));
-    
+
     match node.value() {
         YamlValue::Object(map) => {
             println!("Object with {} keys", map.len());
@@ -258,8 +258,12 @@ production:
     match node.value() {
         YamlValue::Object(map) => {
             let defaults = map.get("defaults").unwrap();
-            assert_eq!(defaults.anchor(), Some("config"), "Anchor should be 'config'");
-            
+            assert_eq!(
+                defaults.anchor(),
+                Some("config"),
+                "Anchor should be 'config'"
+            );
+
             // Verify value display
             match defaults.value() {
                 YamlValue::Object(_) => {
@@ -274,8 +278,8 @@ production:
 
 #[test]
 fn test_anchor_delete_protection() {
-    use yamlquill::editor::state::EditorState;
     use yamlquill::document::tree::YamlTree;
+    use yamlquill::editor::state::EditorState;
 
     let yaml = r#"
 defaults: &config
@@ -295,7 +299,11 @@ production:
 
     // Verify we're on the defaults node with anchor
     let current_node = state.tree().get_node(&defaults_path).unwrap();
-    assert_eq!(current_node.anchor(), Some("config"), "Should be on node with 'config' anchor");
+    assert_eq!(
+        current_node.anchor(),
+        Some("config"),
+        "Should be on node with 'config' anchor"
+    );
 
     // Attempt to delete the node with the anchor
     let result = state.delete_node_at_cursor();
@@ -306,7 +314,10 @@ production:
 
     // Verify the node is still present
     let node_after_delete = state.tree().get_node(state.cursor().path());
-    assert!(node_after_delete.is_some(), "Node should still exist after blocked delete");
+    assert!(
+        node_after_delete.is_some(),
+        "Node should still exist after blocked delete"
+    );
     assert_eq!(
         node_after_delete.unwrap().anchor(),
         Some("config"),
@@ -334,8 +345,8 @@ production:
 
 #[test]
 fn test_delete_node_without_anchor() {
-    use yamlquill::editor::state::EditorState;
     use yamlquill::document::tree::YamlTree;
+    use yamlquill::editor::state::EditorState;
 
     let yaml = r#"
 defaults: &config
@@ -356,7 +367,11 @@ standalone:
 
     // Verify we're on the standalone node without anchor
     let current_node = state.tree().get_node(&standalone_path).unwrap();
-    assert_eq!(current_node.anchor(), None, "Should be on node without anchor");
+    assert_eq!(
+        current_node.anchor(),
+        None,
+        "Should be on node without anchor"
+    );
 
     // Get the path before deletion
     let path = standalone_path;
@@ -365,7 +380,10 @@ standalone:
     let result = state.delete_node_at_cursor();
 
     // Deletion should succeed
-    assert!(result.is_ok(), "Delete should succeed for node without anchor");
+    assert!(
+        result.is_ok(),
+        "Delete should succeed for node without anchor"
+    );
 
     // Verify the node is actually deleted
     let node_after_delete = state.tree().get_node(&path);
@@ -382,8 +400,8 @@ standalone:
 
 #[test]
 fn test_delete_anchor_after_aliases_removed() {
-    use yamlquill::editor::state::EditorState;
     use yamlquill::document::tree::YamlTree;
+    use yamlquill::editor::state::EditorState;
 
     let yaml = r#"
 defaults: &config
@@ -404,7 +422,10 @@ production:
     // Verify we're on the alias
     let alias_node = state.tree().get_node(&alias_path).unwrap();
     assert!(
-        matches!(alias_node.value(), yamlquill::document::node::YamlValue::Alias(_)),
+        matches!(
+            alias_node.value(),
+            yamlquill::document::node::YamlValue::Alias(_)
+        ),
         "Should be on alias node"
     );
 
@@ -418,7 +439,11 @@ production:
 
     // Verify we're on the defaults node with anchor
     let anchor_node = state.tree().get_node(&anchor_path).unwrap();
-    assert_eq!(anchor_node.anchor(), Some("config"), "Should be on anchor node");
+    assert_eq!(
+        anchor_node.anchor(),
+        Some("config"),
+        "Should be on anchor node"
+    );
 
     // Now try to delete the anchor (should succeed since no aliases reference it)
     let result = state.delete_node_at_cursor();
@@ -428,12 +453,24 @@ production:
     // 1. The root object now has only 1 entry (production)
     // 2. The defaults object with anchor "config" is gone
     if let YamlValue::Object(map) = state.tree().root().value() {
-        assert_eq!(map.len(), 1, "Root should have only 1 entry after deleting defaults");
-        assert_eq!(map.get_index(0).unwrap().0, "production", "First entry should now be production");
+        assert_eq!(
+            map.len(),
+            1,
+            "Root should have only 1 entry after deleting defaults"
+        );
+        assert_eq!(
+            map.get_index(0).unwrap().0,
+            "production",
+            "First entry should now be production"
+        );
 
         // Verify the defaults object with anchor is truly gone
         for (_key, val) in map.iter() {
-            assert_ne!(val.anchor(), Some("config"), "Anchor 'config' should be gone");
+            assert_ne!(
+                val.anchor(),
+                Some("config"),
+                "Anchor 'config' should be gone"
+            );
         }
     } else {
         panic!("Root should be an object");
