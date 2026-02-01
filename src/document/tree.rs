@@ -116,22 +116,26 @@ impl YamlTree {
     /// let tree = YamlTree::new(root);
     /// ```
     pub fn new(root: YamlNode) -> Self {
-        Self {
+        let mut tree = Self {
             root,
             original_source: None,
             anchor_registry: AnchorRegistry::new(),
-        }
+        };
+        tree.build_anchor_registry();
+        tree
     }
 
     /// Creates a new YAML tree with the given root node and original source.
     ///
     /// The original source enables format preservation for unmodified nodes.
     pub fn with_source(root: YamlNode, original_source: Option<String>) -> Self {
-        Self {
+        let mut tree = Self {
             root,
             original_source,
             anchor_registry: AnchorRegistry::new(),
-        }
+        };
+        tree.build_anchor_registry();
+        tree
     }
 
     /// Returns a reference to the original YAML source, if available.
@@ -457,6 +461,53 @@ impl YamlTree {
         }
 
         path.chars().filter(|c| *c == '.' || *c == '[').count()
+    }
+
+    /// Builds the anchor registry by walking the tree and registering all anchors and aliases.
+    pub fn build_anchor_registry(&mut self) {
+        self.anchor_registry = AnchorRegistry::new();
+        self.register_anchors_recursive(&self.root.clone(), &[]);
+    }
+
+    /// Recursively registers anchors and aliases in the tree.
+    fn register_anchors_recursive(&mut self, node: &YamlNode, path: &[usize]) {
+        // Register anchor if this node has one
+        if let Some(anchor_name) = node.anchor() {
+            self.anchor_registry
+                .register_anchor(anchor_name.to_string(), path.to_vec());
+        }
+
+        // Register alias if this node is an alias
+        if let Some(alias_target) = node.alias_target() {
+            self.anchor_registry
+                .register_alias(path.to_vec(), alias_target.to_string());
+        }
+
+        // Recurse into children
+        match node.value() {
+            YamlValue::Object(map) => {
+                for (i, (_key, child)) in map.iter().enumerate() {
+                    let mut child_path = path.to_vec();
+                    child_path.push(i);
+                    self.register_anchors_recursive(child, &child_path);
+                }
+            }
+            YamlValue::Array(items) => {
+                for (i, child) in items.iter().enumerate() {
+                    let mut child_path = path.to_vec();
+                    child_path.push(i);
+                    self.register_anchors_recursive(child, &child_path);
+                }
+            }
+            YamlValue::MultiDoc(docs) => {
+                for (i, child) in docs.iter().enumerate() {
+                    let mut child_path = path.to_vec();
+                    child_path.push(i);
+                    self.register_anchors_recursive(child, &child_path);
+                }
+            }
+            _ => {} // Scalar types don't have children
+        }
     }
 }
 

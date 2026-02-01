@@ -786,6 +786,22 @@ impl EditorState {
             .ok_or_else(|| anyhow::anyhow!("No node at cursor"))?
             .clone();
 
+        // Check if node has an anchor that's being referenced
+        if let Some(anchor_name) = node.anchor() {
+            let aliases = self.tree.anchor_registry().get_aliases_for(anchor_name);
+            if !aliases.is_empty() {
+                self.set_message(
+                    format!(
+                        "Cannot delete anchor '{}' - {} alias(es) reference it",
+                        anchor_name,
+                        aliases.len()
+                    ),
+                    MessageLevel::Error,
+                );
+                return Ok(());
+            }
+        }
+
         // Store key if deleting from object
         let key = if !path.is_empty() {
             let parent_path = &path[..path.len() - 1];
@@ -835,6 +851,10 @@ impl EditorState {
 
         // Delete the node
         self.tree.delete_node(&path)?;
+
+        // Update anchor registry to remove registrations for the deleted node
+        self.tree.anchor_registry_mut().remove_node(&path);
+
         self.mark_dirty();
 
         // Update expanded paths to account for shifted indices after deletion
@@ -2784,6 +2804,19 @@ impl EditorState {
     pub fn start_editing(&mut self) {
         let path = self.cursor.path();
         if let Some(node) = self.tree.get_node(path) {
+            // Check if node is an alias - aliases are read-only
+            if let crate::document::node::YamlValue::Alias(name) = node.value() {
+                let anchor_name = node.alias_target().unwrap_or(name);
+                self.set_message(
+                    format!(
+                        "Cannot edit alias - navigate to anchor definition (&{}) to edit",
+                        anchor_name
+                    ),
+                    MessageLevel::Error,
+                );
+                return;
+            }
+
             // Check if node is editable (not a container)
             match node.value() {
                 crate::document::node::YamlValue::Object(_)
@@ -2827,12 +2860,9 @@ impl EditorState {
                     self.edit_buffer = Some("null".to_string());
                     self.reset_cursor_blink();
                 }
-                crate::document::node::YamlValue::Alias(name) => {
-                    // Pre-populate with alias reference
-                    let content = format!("*{}", name);
-                    self.edit_cursor = content.len();
-                    self.edit_buffer = Some(content);
-                    self.reset_cursor_blink();
+                crate::document::node::YamlValue::Alias(_) => {
+                    // Unreachable - handled above with error message
+                    unreachable!("Alias editing should be blocked earlier");
                 }
             }
         }

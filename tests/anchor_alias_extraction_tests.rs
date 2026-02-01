@@ -271,3 +271,171 @@ production:
         _ => panic!("Expected root to be Object"),
     }
 }
+
+#[test]
+fn test_anchor_delete_protection() {
+    use yamlquill::editor::state::EditorState;
+    use yamlquill::document::tree::YamlTree;
+
+    let yaml = r#"
+defaults: &config
+  timeout: 30
+
+production:
+  settings: *config
+"#;
+    let node = parse_yaml_auto(yaml).unwrap();
+    let tree = YamlTree::new(node);
+    let mut state = EditorState::new_with_default_theme(tree);
+
+    // Directly access the node at path [0] (first value in root object)
+    // This is the "defaults" object which has the &config anchor
+    let defaults_path = vec![0];
+    state.cursor_mut().set_path(defaults_path.clone());
+
+    // Verify we're on the defaults node with anchor
+    let current_node = state.tree().get_node(&defaults_path).unwrap();
+    assert_eq!(current_node.anchor(), Some("config"), "Should be on node with 'config' anchor");
+
+    // Attempt to delete the node with the anchor
+    let result = state.delete_node_at_cursor();
+
+    // Deletion should succeed (returns Ok) but the node should still be there
+    // because we blocked it and returned early
+    assert!(result.is_ok(), "Delete function should return Ok");
+
+    // Verify the node is still present
+    let node_after_delete = state.tree().get_node(state.cursor().path());
+    assert!(node_after_delete.is_some(), "Node should still exist after blocked delete");
+    assert_eq!(
+        node_after_delete.unwrap().anchor(),
+        Some("config"),
+        "Anchor should still be present"
+    );
+
+    // Verify there's an error message
+    let message = state.message();
+    assert!(message.is_some(), "Should have an error message");
+    let msg_text = &message.unwrap().text;
+    assert!(
+        msg_text.contains("Cannot delete anchor"),
+        "Message should indicate anchor deletion is blocked, got: {}",
+        msg_text
+    );
+    assert!(
+        msg_text.contains("config"),
+        "Message should mention the anchor name 'config'"
+    );
+    assert!(
+        msg_text.contains("1 alias(es)"),
+        "Message should indicate 1 alias references it"
+    );
+}
+
+#[test]
+fn test_delete_node_without_anchor() {
+    use yamlquill::editor::state::EditorState;
+    use yamlquill::document::tree::YamlTree;
+
+    let yaml = r#"
+defaults: &config
+  timeout: 30
+  retries: 3
+
+standalone:
+  name: test
+"#;
+    let node = parse_yaml_auto(yaml).unwrap();
+    let tree = YamlTree::new(node);
+    let mut state = EditorState::new_with_default_theme(tree);
+
+    // Directly access the node at path [1] (second value in root object)
+    // This is the "standalone" object which has no anchor
+    let standalone_path = vec![1];
+    state.cursor_mut().set_path(standalone_path.clone());
+
+    // Verify we're on the standalone node without anchor
+    let current_node = state.tree().get_node(&standalone_path).unwrap();
+    assert_eq!(current_node.anchor(), None, "Should be on node without anchor");
+
+    // Get the path before deletion
+    let path = standalone_path;
+
+    // Attempt to delete the node
+    let result = state.delete_node_at_cursor();
+
+    // Deletion should succeed
+    assert!(result.is_ok(), "Delete should succeed for node without anchor");
+
+    // Verify the node is actually deleted
+    let node_after_delete = state.tree().get_node(&path);
+    assert!(node_after_delete.is_none(), "Node should be deleted");
+
+    // No error message should be present (or message should not be about anchor)
+    if let Some(msg) = state.message() {
+        assert!(
+            !msg.text.contains("Cannot delete anchor"),
+            "Should not have anchor deletion error"
+        );
+    }
+}
+
+#[test]
+fn test_delete_anchor_after_aliases_removed() {
+    use yamlquill::editor::state::EditorState;
+    use yamlquill::document::tree::YamlTree;
+
+    let yaml = r#"
+defaults: &config
+  timeout: 30
+
+production:
+  settings: *config
+"#;
+    let node = parse_yaml_auto(yaml).unwrap();
+    let tree = YamlTree::new(node);
+    let mut state = EditorState::new_with_default_theme(tree);
+
+    // First, delete the alias at production.settings (path [1, 0])
+    // Path [1] is the production object, [1, 0] is the first field (settings)
+    let alias_path = vec![1, 0];
+    state.cursor_mut().set_path(alias_path.clone());
+
+    // Verify we're on the alias
+    let alias_node = state.tree().get_node(&alias_path).unwrap();
+    assert!(
+        matches!(alias_node.value(), yamlquill::document::node::YamlValue::Alias(_)),
+        "Should be on alias node"
+    );
+
+    // Delete the alias
+    let result = state.delete_node_at_cursor();
+    assert!(result.is_ok(), "Should be able to delete alias");
+
+    // Now try to delete the anchor at path [0] (defaults object)
+    let anchor_path = vec![0];
+    state.cursor_mut().set_path(anchor_path.clone());
+
+    // Verify we're on the defaults node with anchor
+    let anchor_node = state.tree().get_node(&anchor_path).unwrap();
+    assert_eq!(anchor_node.anchor(), Some("config"), "Should be on anchor node");
+
+    // Now try to delete the anchor (should succeed since no aliases reference it)
+    let result = state.delete_node_at_cursor();
+    assert!(result.is_ok(), "Delete should succeed");
+
+    // Verify the node is actually deleted by checking:
+    // 1. The root object now has only 1 entry (production)
+    // 2. The defaults object with anchor "config" is gone
+    if let YamlValue::Object(map) = state.tree().root().value() {
+        assert_eq!(map.len(), 1, "Root should have only 1 entry after deleting defaults");
+        assert_eq!(map.get_index(0).unwrap().0, "production", "First entry should now be production");
+
+        // Verify the defaults object with anchor is truly gone
+        for (_key, val) in map.iter() {
+            assert_ne!(val.anchor(), Some("config"), "Anchor 'config' should be gone");
+        }
+    } else {
+        panic!("Root should be an object");
+    }
+}
