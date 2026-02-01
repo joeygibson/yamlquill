@@ -217,6 +217,103 @@ impl YamlValue {
             YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_)
         )
     }
+
+    /// Check if this value can be converted to the target type
+    pub fn can_convert_to(&self, target_type: &str) -> bool {
+        match target_type {
+            "string" => true, // Everything can convert to string
+            "number" => self.can_parse_as_number(),
+            "bool" => self.can_parse_as_bool(),
+            "null" => true, // Can always convert to null (deletion)
+            _ => false,
+        }
+    }
+
+    fn can_parse_as_number(&self) -> bool {
+        match self {
+            YamlValue::Number(_) => true,
+            YamlValue::String(s) => {
+                s.as_str().parse::<i64>().is_ok() || s.as_str().parse::<f64>().is_ok()
+            }
+            YamlValue::Boolean(_) => true, // true=1, false=0
+            _ => false,
+        }
+    }
+
+    fn can_parse_as_bool(&self) -> bool {
+        match self {
+            YamlValue::Boolean(_) => true,
+            YamlValue::Number(n) => {
+                // 0 or 1
+                matches!(n, YamlNumber::Integer(0) | YamlNumber::Integer(1))
+            }
+            YamlValue::String(s) => {
+                matches!(s.as_str(), "true" | "false" | "yes" | "no")
+            }
+            _ => false,
+        }
+    }
+
+    /// Convert this value to the target type
+    pub fn convert_to(&self, target_type: &str) -> Option<YamlValue> {
+        match target_type {
+            "string" => Some(YamlValue::String(YamlString::Plain(self.to_string()))),
+            "number" => self.to_number(),
+            "bool" => self.to_bool(),
+            "null" => Some(YamlValue::Null),
+            _ => None,
+        }
+    }
+
+    fn to_number(&self) -> Option<YamlValue> {
+        match self {
+            YamlValue::Number(n) => Some(YamlValue::Number(n.clone())),
+            YamlValue::String(s) => {
+                if let Ok(i) = s.as_str().parse::<i64>() {
+                    Some(YamlValue::Number(YamlNumber::Integer(i)))
+                } else if let Ok(f) = s.as_str().parse::<f64>() {
+                    Some(YamlValue::Number(YamlNumber::Float(f)))
+                } else {
+                    None
+                }
+            }
+            YamlValue::Boolean(b) => Some(YamlValue::Number(YamlNumber::Integer(if *b {
+                1
+            } else {
+                0
+            }))),
+            _ => None,
+        }
+    }
+
+    fn to_bool(&self) -> Option<YamlValue> {
+        match self {
+            YamlValue::Boolean(b) => Some(YamlValue::Boolean(*b)),
+            YamlValue::Number(YamlNumber::Integer(0)) => Some(YamlValue::Boolean(false)),
+            YamlValue::Number(YamlNumber::Integer(1)) => Some(YamlValue::Boolean(true)),
+            YamlValue::String(s) => match s.as_str() {
+                "true" | "yes" => Some(YamlValue::Boolean(true)),
+                "false" | "no" => Some(YamlValue::Boolean(false)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for YamlValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            YamlValue::Null => write!(f, "null"),
+            YamlValue::Boolean(b) => write!(f, "{}", b),
+            YamlValue::Number(n) => write!(f, "{}", n),
+            YamlValue::String(s) => write!(f, "{}", s),
+            YamlValue::Array(_) => write!(f, "[array]"),
+            YamlValue::Object(_) => write!(f, "{{object}}"),
+            YamlValue::Alias(a) => write!(f, "*{}", a),
+            YamlValue::MultiDoc(_) => write!(f, "[multi-doc]"),
+        }
+    }
 }
 
 impl YamlNode {
@@ -410,5 +507,51 @@ mod text_span_tests {
         let float = YamlNumber::Float(42.0);
         assert!(float.is_float());
         assert!(!float.is_integer());
+    }
+
+    #[test]
+    fn test_can_convert_to_number() {
+        let string_num = YamlValue::String(YamlString::Plain("42".to_string()));
+        assert!(string_num.can_convert_to("number"));
+
+        let string_text = YamlValue::String(YamlString::Plain("hello".to_string()));
+        assert!(!string_text.can_convert_to("number"));
+
+        let num = YamlValue::Number(YamlNumber::Integer(42));
+        assert!(num.can_convert_to("number"));
+    }
+
+    #[test]
+    fn test_convert_string_to_number() {
+        let string_int = YamlValue::String(YamlString::Plain("42".to_string()));
+        let result = string_int.convert_to("number").unwrap();
+        assert!(matches!(result, YamlValue::Number(YamlNumber::Integer(42))));
+
+        let string_float = YamlValue::String(YamlString::Plain("42.5".to_string()));
+        let result = string_float.convert_to("number").unwrap();
+        assert!(
+            matches!(result, YamlValue::Number(YamlNumber::Float(f)) if (f - 42.5).abs() < 0.001)
+        );
+    }
+
+    #[test]
+    fn test_convert_to_bool() {
+        let string_true = YamlValue::String(YamlString::Plain("true".to_string()));
+        let result = string_true.convert_to("bool").unwrap();
+        assert!(matches!(result, YamlValue::Boolean(true)));
+
+        let num_one = YamlValue::Number(YamlNumber::Integer(1));
+        let result = num_one.convert_to("bool").unwrap();
+        assert!(matches!(result, YamlValue::Boolean(true)));
+    }
+
+    #[test]
+    fn test_convert_to_string() {
+        let num = YamlValue::Number(YamlNumber::Integer(42));
+        let result = num.convert_to("string").unwrap();
+        match result {
+            YamlValue::String(s) => assert_eq!(s.as_str(), "42"),
+            _ => panic!("Expected string"),
+        }
     }
 }
