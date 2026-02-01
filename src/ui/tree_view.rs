@@ -185,6 +185,8 @@ impl TreeViewState {
 
             // Show collapsed preview for the line itself
             let preview = format_collapsed_preview(node, 60);
+            // Add anchor badge if present
+            let preview = self.add_anchor_badge(preview, node);
             self.lines.push(TreeViewLine {
                 path: path.clone(),
                 depth: 0,
@@ -277,6 +279,8 @@ impl TreeViewState {
                     } else {
                         self.get_value_preview(child.value())
                     };
+                    // Add anchor badge if present
+                    let value_preview = self.add_anchor_badge(value_preview, child);
 
                     self.lines.push(TreeViewLine {
                         path: child_path.clone(),
@@ -305,6 +309,8 @@ impl TreeViewState {
                     } else {
                         self.get_value_preview(child.value())
                     };
+                    // Add anchor badge if present
+                    let value_preview = self.add_anchor_badge(value_preview, child);
 
                     self.lines.push(TreeViewLine {
                         path: child_path.clone(),
@@ -336,6 +342,15 @@ impl TreeViewState {
             YamlValue::Boolean(b) => b.to_string(),
             YamlValue::Null => "null".to_string(),
             YamlValue::Alias(name) => format!("*{}", name),
+        }
+    }
+
+    /// Appends anchor badge to value preview if node has an anchor
+    fn add_anchor_badge(&self, preview: String, node: &YamlNode) -> String {
+        if let Some(anchor) = node.anchor() {
+            format!("{} &{}", preview, anchor)
+        } else {
+            preview
         }
     }
 

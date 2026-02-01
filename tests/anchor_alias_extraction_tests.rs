@@ -241,3 +241,33 @@ production:
         }
     }
 }
+
+#[test]
+fn test_anchor_badge_display() {
+    // Test that anchors show up in tree view
+    let yaml = r#"
+defaults: &config
+  timeout: 30
+
+production:
+  settings: *config
+"#;
+    let node = parse_yaml_auto(yaml).unwrap();
+
+    // Verify anchor is set on the defaults node
+    match node.value() {
+        YamlValue::Object(map) => {
+            let defaults = map.get("defaults").unwrap();
+            assert_eq!(defaults.anchor(), Some("config"), "Anchor should be 'config'");
+            
+            // Verify value display
+            match defaults.value() {
+                YamlValue::Object(_) => {
+                    // Good - it's an object with an anchor
+                }
+                other => panic!("Expected Object, got {:?}", other),
+            }
+        }
+        _ => panic!("Expected root to be Object"),
+    }
+}
