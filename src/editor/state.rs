@@ -2869,7 +2869,15 @@ impl EditorState {
         } else {
             // Otherwise, determine the new value based on the original node's type
             match node.value() {
-                YamlValue::String(_) => YamlValue::String(YamlString::Plain(buffer_content)),
+                YamlValue::String(original_style) => {
+                    // Preserve the original string style (Plain, Literal, or Folded)
+                    let new_string = match original_style {
+                        YamlString::Plain(_) => YamlString::Plain(buffer_content),
+                        YamlString::Literal(_) => YamlString::Literal(buffer_content),
+                        YamlString::Folded(_) => YamlString::Folded(buffer_content),
+                    };
+                    YamlValue::String(new_string)
+                }
                 YamlValue::Number(_) => {
                     // Try integer first, then float
                     if let Ok(i) = buffer_content.parse::<i64>() {
