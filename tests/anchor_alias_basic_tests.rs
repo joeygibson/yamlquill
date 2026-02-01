@@ -1,7 +1,7 @@
 //! Basic tests for anchor/alias data model
 
 use yamlquill::document::node::{YamlNode, YamlValue};
-use yamlquill::document::tree::AnchorRegistry;
+use yamlquill::document::tree::{AnchorRegistry, YamlTree};
 
 #[test]
 fn test_yaml_node_has_alias_target_field() {
@@ -69,4 +69,12 @@ fn test_anchor_registry_remove_node() {
     // Remove alias node
     registry.remove_node(&[1]);
     assert_eq!(registry.get_aliases_for("test").len(), 0);
+}
+
+#[test]
+fn test_yaml_tree_has_anchor_registry() {
+    let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
+
+    // Should have an anchor registry
+    assert!(tree.anchor_registry().get_anchor_path("test").is_none());
 }

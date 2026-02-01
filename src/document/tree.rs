@@ -33,7 +33,7 @@ use super::node::{YamlNode, YamlValue};
 use std::collections::HashMap;
 
 /// Tracks anchor definitions and alias references within a YAML tree.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct AnchorRegistry {
     /// Maps anchor names to the path of the node with that anchor
     anchor_definitions: HashMap<String, Vec<usize>>,
@@ -96,6 +96,8 @@ pub struct YamlTree {
     root: YamlNode,
     /// The original YAML string (preserved for unmodified nodes)
     original_source: Option<String>,
+    /// Tracks anchor definitions and alias references
+    anchor_registry: AnchorRegistry,
 }
 
 impl YamlTree {
@@ -117,6 +119,7 @@ impl YamlTree {
         Self {
             root,
             original_source: None,
+            anchor_registry: AnchorRegistry::new(),
         }
     }
 
@@ -127,12 +130,23 @@ impl YamlTree {
         Self {
             root,
             original_source,
+            anchor_registry: AnchorRegistry::new(),
         }
     }
 
     /// Returns a reference to the original YAML source, if available.
     pub fn original_source(&self) -> Option<&str> {
         self.original_source.as_deref()
+    }
+
+    /// Returns a reference to the anchor registry.
+    pub fn anchor_registry(&self) -> &AnchorRegistry {
+        &self.anchor_registry
+    }
+
+    /// Returns a mutable reference to the anchor registry.
+    pub fn anchor_registry_mut(&mut self) -> &mut AnchorRegistry {
+        &mut self.anchor_registry
     }
 
     /// Returns a reference to the root node of the tree.
