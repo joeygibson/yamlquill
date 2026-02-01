@@ -156,7 +156,7 @@ pub fn render_status_line(f: &mut Frame, area: Rect, state: &EditorState, colors
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{YamlNode, YamlValue};
+    use crate::document::node::{YamlNode, YamlValue, YamlString};
     use crate::document::tree::YamlTree;
     use crate::editor::state::EditorState;
     use crate::theme;
@@ -304,15 +304,21 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create tree: {"users": [{"name": "Alice"}]}
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "users".to_string(),
-            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
-                vec![(
-                    "name".to_string(),
-                    YamlNode::new(YamlValue::String("Alice".to_string())),
-                )],
-            ))])),
-        )])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![(
+                "users".to_string(),
+                YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
+                    vec![(
+                        "name".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                    )]
+                    .into_iter()
+                    .collect(),
+                ))])),
+            )]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());
@@ -351,15 +357,21 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create tree: {"users": [{"name": "Alice"}]}
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "users".to_string(),
-            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
-                vec![(
-                    "name".to_string(),
-                    YamlNode::new(YamlValue::String("Alice".to_string())),
-                )],
-            ))])),
-        )])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![(
+                "users".to_string(),
+                YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
+                    vec![(
+                        "name".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                    )]
+                    .into_iter()
+                    .collect(),
+                ))])),
+            )]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());
@@ -395,7 +407,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create empty object - cursor will be at root since there are no children
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(indexmap::IndexMap::new())));
 
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());
@@ -438,13 +450,21 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create tree: {"users": {"name": "Alice"}}
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "users".to_string(),
-            YamlNode::new(YamlValue::Object(vec![(
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Alice".to_string())),
-            )])),
-        )])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![(
+                "users".to_string(),
+                YamlNode::new(YamlValue::Object(
+                    vec![(
+                        "name".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                    )]
+                    .into_iter()
+                    .collect(),
+                )),
+            )]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());
@@ -478,15 +498,21 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Create tree: {"users": [{"name": "Alice"}]}
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "users".to_string(),
-            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
-                vec![(
-                    "name".to_string(),
-                    YamlNode::new(YamlValue::String("Alice".to_string())),
-                )],
-            ))])),
-        )])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![(
+                "users".to_string(),
+                YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
+                    vec![(
+                        "name".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                    )]
+                    .into_iter()
+                    .collect(),
+                ))])),
+            )]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_filename("test.json".to_string());

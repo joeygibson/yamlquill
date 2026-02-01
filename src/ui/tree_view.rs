@@ -827,11 +827,12 @@ fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::node::{YamlString, YamlNumber};
 
     #[test]
     fn test_value_type_from_json() {
         assert_eq!(
-            ValueType::from_yaml_value(&YamlValue::Object(vec![])),
+            ValueType::from_yaml_value(&YamlValue::Object(indexmap::IndexMap::new())),
             ValueType::Object
         );
         assert_eq!(
@@ -839,11 +840,11 @@ mod tests {
             ValueType::Array
         );
         assert_eq!(
-            ValueType::from_yaml_value(&YamlValue::String("x".to_string())),
+            ValueType::from_yaml_value(&YamlValue::String(YamlString::Plain("x".to_string()))),
             ValueType::String
         );
         assert_eq!(
-            ValueType::from_yaml_value(&YamlValue::Number(42.0)),
+            ValueType::from_yaml_value(&YamlValue::Number(YamlNumber::Integer(42))),
             ValueType::Number
         );
         assert_eq!(
@@ -864,13 +865,17 @@ mod tests {
 
     #[test]
     fn test_rebuild_with_flat_object() {
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-            (
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Alice".to_string())),
-            ),
-            ("age".to_string(), YamlNode::new(YamlValue::Number(30.0))),
-        ])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![
+                (
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                ),
+                ("age".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(30)))),
+            ]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = TreeViewState::new();
         state.rebuild(&tree);
@@ -884,8 +889,8 @@ mod tests {
     #[test]
     fn test_rebuild_with_array() {
         let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![
-            YamlNode::new(YamlValue::Number(1.0)),
-            YamlNode::new(YamlValue::Number(2.0)),
+            YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+            YamlNode::new(YamlValue::Number(YamlNumber::Integer(2))),
         ])));
 
         let mut state = TreeViewState::new();
@@ -912,13 +917,21 @@ mod tests {
 
     #[test]
     fn test_nested_object_collapsed() {
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "user".to_string(),
-            YamlNode::new(YamlValue::Object(vec![(
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Bob".to_string())),
-            )])),
-        )])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![(
+                "user".to_string(),
+                YamlNode::new(YamlValue::Object(
+                    vec![(
+                        "name".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("Bob".to_string()))),
+                    )]
+                    .into_iter()
+                    .collect(),
+                )),
+            )]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = TreeViewState::new();
         state.rebuild(&tree);
@@ -931,13 +944,21 @@ mod tests {
 
     #[test]
     fn test_nested_object_expanded() {
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "user".to_string(),
-            YamlNode::new(YamlValue::Object(vec![(
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Bob".to_string())),
-            )])),
-        )])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![(
+                "user".to_string(),
+                YamlNode::new(YamlValue::Object(
+                    vec![(
+                        "name".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("Bob".to_string()))),
+                    )]
+                    .into_iter()
+                    .collect(),
+                )),
+            )]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = TreeViewState::new();
         state.toggle_expand(&[0]); // Expand "user"
@@ -957,11 +978,11 @@ mod tests {
 
         // Scalars still use simple format
         assert_eq!(
-            state.get_value_preview(&YamlValue::String("test".to_string())),
+            state.get_value_preview(&YamlValue::String(YamlString::Plain("test".to_string()))),
             "\"test\""
         );
         assert_eq!(
-            state.get_value_preview(&YamlValue::Number(std::f64::consts::PI)),
+            state.get_value_preview(&YamlValue::Number(YamlNumber::Float(std::f64::consts::PI))),
             std::f64::consts::PI.to_string()
         );
         assert_eq!(state.get_value_preview(&YamlValue::Boolean(true)), "true");
@@ -977,13 +998,17 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-            (
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Alice".to_string())),
-            ),
-            ("age".to_string(), YamlNode::new(YamlValue::Number(30.0))),
-        ])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![
+                (
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                ),
+                ("age".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(30)))),
+            ]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = TreeViewState::new();
         state.rebuild(&tree);
@@ -1030,10 +1055,14 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "name".to_string(),
-            YamlNode::new(YamlValue::String("Alice".to_string())),
-        )])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![(
+                "name".to_string(),
+                YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+            )]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = TreeViewState::new();
         state.rebuild(&tree);
@@ -1100,10 +1129,14 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![(
-            "name".to_string(),
-            YamlNode::new(YamlValue::String("Alice".to_string())),
-        )])));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![(
+                "name".to_string(),
+                YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+            )]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = TreeViewState::new();
         state.rebuild(&tree);
@@ -1151,13 +1184,17 @@ mod tests {
     fn test_format_collapsed_preview_simple_object() {
         use crate::document::node::{YamlNode, YamlValue};
 
-        let obj = YamlNode::new(YamlValue::Object(vec![
-            ("id".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-            (
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Alice".to_string())),
-            ),
-        ]));
+        let obj = YamlNode::new(YamlValue::Object(
+            vec![
+                ("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+                (
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ));
 
         let preview = format_collapsed_preview(&obj, 100);
         assert_eq!(preview, "(2) {id: 1, name: \"Alice\"}");
@@ -1167,16 +1204,24 @@ mod tests {
     fn test_format_collapsed_preview_nested_object() {
         use crate::document::node::{YamlNode, YamlValue};
 
-        let obj = YamlNode::new(YamlValue::Object(vec![
-            ("id".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-            (
-                "user".to_string(),
-                YamlNode::new(YamlValue::Object(vec![(
-                    "name".to_string(),
-                    YamlNode::new(YamlValue::String("Alice".to_string())),
-                )])),
-            ),
-        ]));
+        let obj = YamlNode::new(YamlValue::Object(
+            vec![
+                ("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+                (
+                    "user".to_string(),
+                    YamlNode::new(YamlValue::Object(
+                        vec![(
+                            "name".to_string(),
+                            YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    )),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ));
 
         let preview = format_collapsed_preview(&obj, 100);
         assert_eq!(preview, "(2) {id: 1, user: {…}}");
@@ -1187,9 +1232,9 @@ mod tests {
         use crate::document::node::{YamlNode, YamlValue};
 
         let arr = YamlNode::new(YamlValue::Array(vec![
-            YamlNode::new(YamlValue::Number(1.0)),
-            YamlNode::new(YamlValue::Number(2.0)),
-            YamlNode::new(YamlValue::Number(3.0)),
+            YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+            YamlNode::new(YamlValue::Number(YamlNumber::Integer(2))),
+            YamlNode::new(YamlValue::Number(YamlNumber::Integer(3))),
         ]));
 
         let preview = format_collapsed_preview(&arr, 100);
@@ -1200,21 +1245,25 @@ mod tests {
     fn test_format_collapsed_preview_truncation() {
         use crate::document::node::{YamlNode, YamlValue};
 
-        let obj = YamlNode::new(YamlValue::Object(vec![
-            ("id".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-            (
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Alice".to_string())),
-            ),
-            (
-                "email".to_string(),
-                YamlNode::new(YamlValue::String("alice@example.com".to_string())),
-            ),
-            (
-                "active".to_string(),
-                YamlNode::new(YamlValue::Boolean(true)),
-            ),
-        ]));
+        let obj = YamlNode::new(YamlValue::Object(
+            vec![
+                ("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+                (
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                ),
+                (
+                    "email".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("alice@example.com".to_string()))),
+                ),
+                (
+                    "active".to_string(),
+                    YamlNode::new(YamlValue::Boolean(true)),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ));
 
         let preview = format_collapsed_preview(&obj, 40);
         assert!(preview.len() <= 43); // Allow a bit of overflow for "..."
@@ -1226,18 +1275,22 @@ mod tests {
         use crate::document::node::{YamlNode, YamlValue};
 
         // Test with multi-byte UTF-8 characters (emoji, Chinese, etc.)
-        let obj = YamlNode::new(YamlValue::Object(vec![
-            (
-                "emoji".to_string(),
-                YamlNode::new(YamlValue::String("🌟✨🎉🎊🎈".to_string())),
-            ),
-            (
-                "chinese".to_string(),
-                YamlNode::new(YamlValue::String(
-                    "你好世界这是一个很长的字符串".to_string(),
-                )),
-            ),
-        ]));
+        let obj = YamlNode::new(YamlValue::Object(
+            vec![
+                (
+                    "emoji".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("🌟✨🎉🎊🎈".to_string()))),
+                ),
+                (
+                    "chinese".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain(
+                        "你好世界这是一个很长的字符串".to_string(),
+                    ))),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ));
 
         // This should not panic even with multi-byte characters
         let preview = format_collapsed_preview(&obj, 40);
@@ -1245,10 +1298,10 @@ mod tests {
 
         // Test array with UTF-8 strings
         let arr = YamlNode::new(YamlValue::Array(vec![
-            YamlNode::new(YamlValue::String("🌟✨🎉🎊🎈🎁🎀🎂".to_string())),
-            YamlNode::new(YamlValue::String(
+            YamlNode::new(YamlValue::String(YamlString::Plain("🌟✨🎉🎊🎈🎁🎀🎂".to_string()))),
+            YamlNode::new(YamlValue::String(YamlString::Plain(
                 "你好世界这是一个很长的字符串".to_string(),
-            )),
+            ))),
         ]));
 
         // This should also not panic
@@ -1262,14 +1315,22 @@ mod tests {
         use crate::document::tree::YamlTree;
 
         let lines = vec![
-            YamlNode::new(YamlValue::Object(vec![(
-                "id".to_string(),
-                YamlNode::new(YamlValue::Number(1.0)),
-            )])),
-            YamlNode::new(YamlValue::Object(vec![(
-                "id".to_string(),
-                YamlNode::new(YamlValue::Number(2.0)),
-            )])),
+            YamlNode::new(YamlValue::Object(
+                vec![(
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+                )]
+                .into_iter()
+                .collect(),
+            )),
+            YamlNode::new(YamlValue::Object(
+                vec![(
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(2))),
+                )]
+                .into_iter()
+                .collect(),
+            )),
         ];
 
         let tree = YamlTree::new(YamlNode::new(YamlValue::MultiDoc(lines)));
@@ -1289,13 +1350,17 @@ mod tests {
         use crate::document::node::{YamlNode, YamlValue};
         use crate::document::tree::YamlTree;
 
-        let lines = vec![YamlNode::new(YamlValue::Object(vec![
-            ("id".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-            (
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Alice".to_string())),
-            ),
-        ]))];
+        let lines = vec![YamlNode::new(YamlValue::Object(
+            vec![
+                ("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+                (
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ))];
 
         let tree = YamlTree::new(YamlNode::new(YamlValue::MultiDoc(lines)));
         let mut state = TreeViewState::new();
@@ -1321,22 +1386,38 @@ mod tests {
 
         // Create array with 4 objects
         let _tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![
-            YamlNode::new(YamlValue::Object(vec![(
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Alice".to_string())),
-            )])),
-            YamlNode::new(YamlValue::Object(vec![(
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Bob".to_string())),
-            )])),
-            YamlNode::new(YamlValue::Object(vec![(
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Charlie".to_string())),
-            )])),
-            YamlNode::new(YamlValue::Object(vec![(
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("Dave".to_string())),
-            )])),
+            YamlNode::new(YamlValue::Object(
+                vec![(
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                )]
+                .into_iter()
+                .collect(),
+            )),
+            YamlNode::new(YamlValue::Object(
+                vec![(
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Bob".to_string()))),
+                )]
+                .into_iter()
+                .collect(),
+            )),
+            YamlNode::new(YamlValue::Object(
+                vec![(
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Charlie".to_string()))),
+                )]
+                .into_iter()
+                .collect(),
+            )),
+            YamlNode::new(YamlValue::Object(
+                vec![(
+                    "name".to_string(),
+                    YamlNode::new(YamlValue::String(YamlString::Plain("Dave".to_string()))),
+                )]
+                .into_iter()
+                .collect(),
+            )),
         ])));
 
         let mut state = TreeViewState::new();
@@ -1369,29 +1450,45 @@ mod tests {
         use crate::document::tree::YamlTree;
 
         // Create nested structure where we'll delete one object but others should stay expanded
-        let mut tree = YamlTree::new(YamlNode::new(YamlValue::Object(vec![
-            (
-                "item1".to_string(),
-                YamlNode::new(YamlValue::Object(vec![(
-                    "nested".to_string(),
-                    YamlNode::new(YamlValue::Number(1.0)),
-                )])),
-            ),
-            (
-                "item2".to_string(),
-                YamlNode::new(YamlValue::Object(vec![(
-                    "nested".to_string(),
-                    YamlNode::new(YamlValue::Number(2.0)),
-                )])),
-            ),
-            (
-                "item3".to_string(),
-                YamlNode::new(YamlValue::Object(vec![(
-                    "nested".to_string(),
-                    YamlNode::new(YamlValue::Number(3.0)),
-                )])),
-            ),
-        ])));
+        let mut tree = YamlTree::new(YamlNode::new(YamlValue::Object(
+            vec![
+                (
+                    "item1".to_string(),
+                    YamlNode::new(YamlValue::Object(
+                        vec![(
+                            "nested".to_string(),
+                            YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    )),
+                ),
+                (
+                    "item2".to_string(),
+                    YamlNode::new(YamlValue::Object(
+                        vec![(
+                            "nested".to_string(),
+                            YamlNode::new(YamlValue::Number(YamlNumber::Integer(2))),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    )),
+                ),
+                (
+                    "item3".to_string(),
+                    YamlNode::new(YamlValue::Object(
+                        vec![(
+                            "nested".to_string(),
+                            YamlNode::new(YamlValue::Number(YamlNumber::Integer(3))),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    )),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        )));
 
         let mut state = TreeViewState::new();
 
