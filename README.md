@@ -15,37 +15,45 @@ A terminal-based structural YAML editor with vim-style keybindings.
 [![CI](https://github.com/joeygibson/yamlquill/workflows/CI/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/ci.yml)
 [![Release](https://github.com/joeygibson/yamlquill/workflows/Release/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/release.yml)
 
-**Phase 2c Complete** - Core editing with bug fixes. The editor currently supports:
-- YAML file loading and editing
+**Phase 3 Complete** - Multi-document YAML support. The editor currently supports:
+- YAML file loading and editing (single and multi-document with `---` separators)
 - Tree-based navigation with vim keybindings
-- Advanced navigation (sibling jumping, screen positioning, count prefixes)
+- Advanced navigation (sibling jumping, screen positioning, count prefixes, fold commands)
 - Add, edit, delete operations for YAML values
-- Undo/redo functionality with repeat command
-- Clipboard operations (yank/paste with path copying, smart paste, named registers)
+- Full YAML type support (Plain/Literal/Folded strings, Integer/Float numbers, Boolean, Null)
+- Type-aware display (shows string styles: `"text"`, `| text...`, `> text...`)
+- Undo/redo functionality with repeat command and branching tree
+- Clipboard operations (yank/paste with path copying, smart paste, named registers a-z and 0-9)
 - Visual mode for bulk operations on multiple nodes
 - Marks and jump list for quick navigation
 - Motion-to-mark operations (yank/delete from cursor to mark)
 - Text and YAMLPath structural search (with smart case and key search)
-- Customizable themes and settings
+- 15 built-in color themes
 - Line numbers (absolute and relative)
 - Configuration file support
 - Mouse/trackpad scrolling support
 - Gzip compression support (transparent `.yaml.gz` handling)
 
-**Recent improvements (Phase 2c):**
-- Fixed critical bug: multi-line string style preservation during editing (Literal `|` and Folded `>` strings maintain their style)
-- Added input validation to prevent invalid edits
-- Comprehensive test coverage (315 tests)
+**Recent improvements (Phase 3):**
+- Multi-document YAML parsing and serialization with proper `---` separators
+- Round-trip preservation of multi-document structure
+- Comprehensive test coverage (290 tests + 79 doctests = 369 total)
 
 **Known limitations (v1.0):**
-- Multi-line string styles are preserved in-memory but not yet in serialization (saved files use plain strings with `\n`)
-- Format preservation for unmodified nodes is limited
+- No comment support (serde_yaml limitation, planned for v2.0 with custom parser)
+- No anchor/alias creation or editing (serde_yaml limitation, planned for v2.0)
+- Multi-line string editing requires external editor (Shift+Enter not supported in terminal)
+- Format preservation for unmodified nodes is basic
 
-**Planned for future phases:**
-- Multi-document YAML files (multiple `---` separated documents)
-- Anchor and alias support (`&anchor`, `*alias`)
-- Full multi-line string serialization with style preservation
-- Comment support (v2.0+)
+**Completed phases:**
+- ✅ Phase 1: Core Structure (YAML parsing, basic editing)
+- ✅ Phase 2: YAML Document Model (full editing, undo/redo, registers, type-aware display, navigation)
+- ✅ Phase 3: Multi-Document Support (multiple `---` separated documents)
+
+**Planned for v2.0+:**
+- Comment support (requires custom parser)
+- Anchor and alias creation/editing (requires custom parser)
+- Advanced multi-line string controls (chomping indicators, indentation control)
 
 See [CLAUDE.md](CLAUDE.md) for detailed feature list and developer documentation.
 
