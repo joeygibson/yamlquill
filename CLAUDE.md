@@ -34,15 +34,44 @@ cargo fmt
 cargo clippy -- -D warnings
 ```
 
-## Pre-Commit Checklist
+## Pre-Commit Requirements
 
-**CRITICAL: ALWAYS run these checks before committing. Never commit without passing all checks.**
+**CRITICAL: These checks are MANDATORY before ANY commit. Never offer to commit without running all checks first.**
+
+### Required Checks (in order)
+
+1. **Format verification:**
+   ```bash
+   cargo fmt --check
+   ```
+   If fails: Run `cargo fmt` to fix, then verify again.
+
+2. **Clippy linting:**
+   ```bash
+   cargo clippy -- -D warnings
+   ```
+   Must pass with zero warnings. Fix all issues before proceeding.
+
+3. **Test suite:**
+   ```bash
+   cargo test
+   ```
+   All tests must pass (currently 388 tests expected).
+
+4. **Documentation updates:**
+   - Update CLAUDE.md if implementation changes project status
+   - Update relevant plan documents if approach changes
+   - Add research findings if investigation was performed
+
+### Quick Check Command
 
 ```bash
-cargo fmt && cargo clippy -- -D warnings && cargo test
+cargo fmt --check && cargo clippy -- -D warnings && cargo test
 ```
 
-All three must pass before creating a commit.
+**Process:** Run all checks → Fix any failures → Verify again → THEN offer to commit.
+
+Never skip these steps. Never assume code is clean without verification.
 
 ## Architecture
 
@@ -398,13 +427,51 @@ git worktree add ~/.config/superpowers/worktrees/yamlquill/feature-name -b featu
 cd ~/.config/superpowers/worktrees/yamlquill/feature-name
 ```
 
+### Commit Workflow
+
+**MANDATORY PROCESS - Never deviate from this sequence:**
+
+1. **Verify code quality:**
+   ```bash
+   cargo fmt --check && cargo clippy -- -D warnings && cargo test
+   ```
+
+2. **Update documentation** (if needed):
+   - CLAUDE.md (project status, phase completion)
+   - Plan documents (implementation details, decisions)
+   - Research findings (investigation results)
+
+3. **Stage changes:**
+   ```bash
+   git add <files>
+   ```
+
+4. **Verify what's staged:**
+   ```bash
+   git status
+   git diff --cached
+   ```
+
+5. **Commit with descriptive message:**
+   ```bash
+   git commit -m "type: description
+
+   - Detail 1
+   - Detail 2
+
+   Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+   ```
+
+**Never skip step 1.** Never offer to commit without completing all verification steps first.
+
 ### Finishing Work in a Worktree
 
 When a phase is complete:
 
-1. Ensure all tests pass
-2. Tag the completion (e.g., `v0.1.0-phase1`)
-3. Decide on integration strategy:
+1. Run pre-commit checks (see Commit Workflow above)
+2. Commit any remaining changes
+3. Tag the completion (e.g., `v0.1.0-phase1`)
+4. Decide on integration strategy:
    - Merge to main
    - Create pull request
    - Continue development in worktree
