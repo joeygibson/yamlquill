@@ -6,22 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **YAMLQuill** is a terminal-based structural YAML editor with vim-style keybindings, forked from [JSONQuill](https://github.com/joeygibson/jsonquill). The goal is to achieve full feature parity with JSONQuill while adding support for YAML-specific features including multi-document files, anchors/aliases, and multi-line strings.
 
-**Status:** Phase 3 Complete - Ready for v1.0 release (Phase 4 deferred to v2.0)
+**Status:** Phase 4b Complete - Anchor/Alias support implemented
 
 ## Development Workflow
 
 This project uses **git worktrees** for isolated feature development. The main repository contains documentation and plans, while implementation happens in worktrees.
 
-**Current worktree:**
-- Location: `~/.config/superpowers/worktrees/yamlquill/initial-implementation`
-- Branch: `feature/initial-implementation`
-- Status: Phase 1 complete, tagged as `v0.1.0-phase1`
-
-### Working in the Worktree
+### Working in the Main Repository
 
 ```bash
-# Navigate to worktree
-cd ~/.config/superpowers/worktrees/yamlquill/initial-implementation
+# Navigate to repository
+cd ~/Projects/yamlquill
 
 # Build
 cargo build
@@ -63,11 +58,11 @@ YAMLQuill is a structural fork of JSONQuill, replacing JSON parsing/serializatio
 
 ### Key Design Decisions
 
-- **Parser:** serde_yaml (v1), comment support deferred to v2
-- **Multi-document:** Full support from start (similar to JSONL in JSONQuill)
+- **Parser:** yaml-rust2 Parser/EventReceiver for anchor/alias support, serde_yaml for serialization
+- **Multi-document:** Full support (similar to JSONL in JSONQuill)
 - **Tree view:** Abstract representation matching JSONQuill (arrays as `[0]`, `[1]`)
-- **Multi-line strings:** Shift+Enter inserts newline, Enter commits
-- **Anchors/aliases:** Show as navigable reference nodes (`⟶ anchor_name`)
+- **Multi-line strings:** Multi-line string type preservation (Literal `|` and Folded `>`)
+- **Anchors/aliases:** Display anchors with `&name` badges, aliases as `*name` nodes with read-only enforcement
 
 ### Module Structure
 
@@ -76,9 +71,9 @@ src/
 ├── main.rs              # Entry point, terminal setup
 ├── lib.rs               # Library exports
 ├── document/            # YAML document representation
-│   ├── parser.rs        # YAML → tree (using serde_yaml)
+│   ├── parser.rs        # YAML → tree (using yaml-rust2 Parser/EventReceiver)
 │   ├── node.rs          # YamlNode, YamlValue types
-│   └── tree.rs          # Tree navigation, mutation
+│   └── tree.rs          # Tree navigation, mutation, AnchorRegistry
 ├── editor/              # Editor state (modes, cursor, undo/redo)
 │   ├── registers.rs     # Named registers a-z, 0-9
 │   ├── marks.rs
@@ -191,21 +186,35 @@ pub enum YamlNumber {
 
 **Phase 3 COMPLETE!**
 
-### Phase 4: YAML-Specific Features (DEFERRED TO v2.0)
+### Phase 4: YAML-Specific Features
 
-**Reason for Deferral:** These features require a custom YAML parser, not serde_yaml:
-- ❌ Anchor storage and display (`&name` badges) - serde_yaml resolves anchors during parsing
-- ❌ Alias nodes and navigation (`⟶ name`) - serde_yaml doesn't preserve alias nodes
-- ❌ Comment support - serde_yaml strips comments
-- ❌ Shift+Enter for multi-line editing - terminal limitation (most terminals don't distinguish Enter vs Shift+Enter)
+**Phase 4a: Parser Investigation ✅ COMPLETE**
+- ✅ Researched yaml-rust2 capabilities (Scanner, Parser, YamlLoader)
+- ✅ Documented YamlLoader alias resolution blocker
+- ✅ Validated Parser/EventReceiver approach preserves anchors and aliases
 
-**Already implemented:**
+**Phase 4b: Anchor/Alias Implementation ✅ COMPLETE**
+- ✅ Implemented Parser/EventReceiver-based tree builder
+- ✅ Added Scanner for extracting anchor/alias names
+- ✅ Created AnchorRegistry for tracking anchor definitions and alias references
+- ✅ Automatic registry population when creating YamlTree
+- ✅ Display anchors with `&name` badges in tree view
+- ✅ Display aliases as `*name` nodes (already supported by existing code)
+- ✅ All 388 tests passing (including 11 new anchor/alias tests)
+
+**Phase 4c: Editing Constraints ✅ COMPLETE**
+- ✅ Read-only alias enforcement (cannot edit alias values directly)
+- ✅ Anchor delete protection (prevents deleting anchors with active aliases)
+- ✅ Registry updates on node deletion to maintain synchronization
+
+**Deferred to v2.0:**
+- ❌ Comment support (requires comment-preserving parser)
+- ❌ Anchor navigation (Enter on alias to jump to anchor definition)
+- ❌ Create/edit anchors and aliases via UI
+
+**Already implemented (Phase 2):**
 - ✅ Multi-line string type preservation (Literal `|` and Folded `>` styles preserved)
 - ✅ Type-aware display showing string styles
-
-**v2.0 Requirements:**
-- Custom YAML parser that preserves comments, anchors, and aliases
-- Enhanced multi-line editor with terminal escape sequence support
 
 ### Phase 5: Polish & Parity ✅ COMPLETE
 
@@ -225,7 +234,8 @@ pub enum YamlNumber {
 
 - **Language:** Rust 2021 edition
 - **UI Framework:** ratatui 0.29 with termion 4.0 backend
-- **YAML Parser:** serde_yaml 0.9
+- **YAML Parser:** yaml-rust2 0.10 (Parser/EventReceiver for parsing, Scanner for tokenization)
+- **YAML Serialization:** serde_yaml 0.9 (for saving files)
 - **Data Structures:** indexmap 2.0 (ordered maps)
 - **CLI:** clap 4.5
 - **Config:** toml 0.8
@@ -233,30 +243,33 @@ pub enum YamlNumber {
 - **Clipboard:** arboard 3.4
 - **Compression:** flate2 1.0
 
-## Key Features (Planned)
+## Key Features
 
-### v1.0 Features
+### v1.0 Features ✅ COMPLETE
 
 - ✅ JSON→YAML conversion complete
-- ✅ Basic YAML parsing and tree view
-- ⏳ Multi-document YAML files
-- ⏳ Anchors and aliases (navigate to anchor on Enter)
-- ⏳ Multi-line strings with style preservation
-- ⏳ All 15 themes from JSONQuill
-- ⏳ Gzip compression support (.yaml.gz)
-- ⏳ Format preservation for unmodified nodes
+- ✅ Full YAML parsing and tree view
+- ✅ Multi-document YAML files
+- ✅ Anchors and aliases (display with `&name` badges and `*name` nodes)
+- ✅ Multi-line strings with style preservation (Literal `|` and Folded `>`)
+- ✅ All 15 themes from JSONQuill
+- ✅ Gzip compression support (.yaml.gz)
+- ✅ Format preservation for unmodified nodes
+- ✅ Anchor delete protection and read-only alias enforcement
 
 ### v1.0 Known Limitations
 
-- ❌ No comment support (serde_yaml limitation)
-- ❌ Cannot create new anchors/aliases (preserve only)
+- ❌ No comment support (yaml-rust2 doesn't preserve comments)
+- ❌ Cannot create new anchors/aliases (display and enforce only)
+- ❌ No anchor navigation (cannot jump to anchor definition from alias)
 - ❌ No tag editing (preserved but not editable)
 - ❌ No advanced multi-line features (chomping, indentation indicators)
 
 ### v2.0+ Future Enhancements
 
-- Comment support (requires custom parser)
+- Comment support (requires comment-preserving parser)
 - Create/edit anchors and aliases via UI
+- Anchor navigation (jump to definition)
 - YAML tag editing
 - Advanced multi-line string controls
 
@@ -286,8 +299,13 @@ cargo test test_parse_simple_yaml
 - `tests/jumplist_tests.rs` - Navigation history
 - `tests/marks_tests.rs` - Mark system
 - `tests/theme_tests.rs` - Theme system
+- `tests/anchor_alias_extraction_tests.rs` - Anchor/alias parsing and editing constraints
+- `tests/multi_document_tests.rs` - Multi-document YAML support
+- `tests/navigation_tests.rs` - Tree navigation
+- `tests/yaml_display_tests.rs` - Type-aware display
+- `tests/yaml_editing_tests.rs` - Value editing operations
 
-**Current Status:** 44 tests passing (Phase 1 baseline)
+**Current Status:** 388 tests passing (309 unit tests + 79 doctests)
 
 ### Test Coverage Goals
 
