@@ -1,4 +1,4 @@
-use jsonquill::config::Config;
+use yamlquill::config::Config;
 
 #[test]
 fn test_config_defaults() {

@@ -1,4 +1,4 @@
-use jsonquill::theme::{colors::ThemeColors, get_builtin_theme};
+use yamlquill::theme::{colors::ThemeColors, get_builtin_theme};
 use ratatui::style::Color;
 
 // Tests for get_builtin_theme function

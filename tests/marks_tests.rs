@@ -1,4 +1,4 @@
-use jsonquill::editor::marks::MarkSet;
+use yamlquill::editor::marks::MarkSet;
 
 #[test]
 fn test_markset_creation() {

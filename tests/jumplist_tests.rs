@@ -1,5 +1,5 @@
 // tests/jumplist_tests.rs
-use jsonquill::editor::jumplist::JumpList;
+use yamlquill::editor::jumplist::JumpList;
 
 #[test]
 fn test_jumplist_creation() {
