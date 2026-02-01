@@ -24,7 +24,8 @@ use anyhow::{bail, Context, Result};
 use indexmap::IndexMap;
 use serde_yaml::{self, Value};
 use std::collections::HashMap;
-use yaml_rust2::scanner::{Scanner, TokenType};
+use yaml_rust2::parser::{Event, EventReceiver, Parser};
+use yaml_rust2::scanner::{Scanner, TScalarStyle, TokenType};
 use yaml_rust2::{Yaml, YamlLoader};
 
 /// Maps anchor/alias names extracted from Scanner to their positions.
@@ -37,6 +38,24 @@ struct AnchorMap {
     anchors: HashMap<String, String>,
     /// Maps alias names to their target anchor names
     aliases: HashMap<String, String>,
+    /// Maps anchor IDs (from Parser events) to anchor names (from Scanner)
+    /// Built sequentially: first anchor encountered gets ID 1, second gets ID 2, etc.
+    id_to_name: HashMap<usize, String>,
+}
+
+impl AnchorMap {
+    /// Look up anchor name by numeric ID (used by Parser events)
+    fn get_anchor_name(&self, id: usize) -> Option<&String> {
+        self.id_to_name.get(&id)
+    }
+
+    /// Build ID-to-name mapping from anchors in document order
+    fn build_id_mapping(&mut self) {
+        // Assume Parser assigns IDs sequentially starting at 1
+        for (idx, name) in self.anchors.values().enumerate() {
+            self.id_to_name.insert(idx + 1, name.clone());
+        }
+    }
 }
 
 /// Scans YAML source text for anchor definitions and alias references.
@@ -84,6 +103,218 @@ fn scan_for_anchors(yaml_str: &str) -> AnchorMap {
     }
 
     anchor_map
+}
+
+/// Builds a YamlNode tree from Parser events.
+///
+/// This struct implements EventReceiver to process Parser events and construct
+/// our internal YamlNode tree structure, preserving anchor and alias information.
+struct TreeBuilder {
+    /// Stack of nodes being built (for nested structures)
+    stack: Vec<BuildNode>,
+    /// Anchor map for looking up anchor names by ID
+    anchor_map: AnchorMap,
+    /// All completed document root nodes
+    documents: Vec<YamlNode>,
+    /// Current key for the next value in a mapping (unused, kept for compatibility)
+    current_key: Option<String>,
+}
+
+/// Represents a node being built (may be incomplete)
+enum BuildNode {
+    /// A mapping being constructed
+    Mapping {
+        entries: IndexMap<String, YamlNode>,
+        anchor: Option<String>,
+        current_key: Option<String>, // Key waiting for its value
+    },
+    /// A sequence being constructed
+    Sequence {
+        elements: Vec<YamlNode>,
+        anchor: Option<String>,
+    },
+}
+
+impl TreeBuilder {
+    fn new(anchor_map: AnchorMap) -> Self {
+        Self {
+            stack: Vec::new(),
+            anchor_map,
+            documents: Vec::new(),
+            current_key: None, // Unused, kept for compatibility
+        }
+    }
+
+    /// Push a completed value node onto the current container or as a document root
+    fn push_value(&mut self, node: YamlNode) {
+        if let Some(container) = self.stack.last_mut() {
+            match container {
+                BuildNode::Mapping {
+                    entries,
+                    current_key,
+                    ..
+                } => {
+                    if let Some(key) = current_key.take() {
+                        entries.insert(key, node);
+                    }
+                }
+                BuildNode::Sequence { elements, .. } => {
+                    elements.push(node);
+                }
+            }
+        } else {
+            // No container on stack - this is a document root
+            self.documents.push(node);
+        }
+    }
+
+    /// Get anchor name from ID (if any)
+    fn get_anchor_name(&self, anchor_id: usize) -> Option<String> {
+        if anchor_id > 0 {
+            self.anchor_map.get_anchor_name(anchor_id).cloned()
+        } else {
+            None
+        }
+    }
+}
+
+impl EventReceiver for TreeBuilder {
+    fn on_event(&mut self, ev: Event) {
+        match ev {
+            Event::Nothing | Event::StreamStart | Event::StreamEnd => {
+                // Ignore structural events
+            }
+
+            Event::DocumentStart => {
+                // Start of document - reset stack for new document
+                self.stack.clear();
+                // Note: We don't clear documents vec, it accumulates all docs
+            }
+
+            Event::DocumentEnd => {
+                // End of document - stack should be empty, root should be set
+            }
+
+            Event::Alias(anchor_id) => {
+                // Create an Alias node
+                let anchor_name = self.get_anchor_name(anchor_id)
+                    .unwrap_or_else(|| format!("unknown_{}", anchor_id));
+
+                let node = YamlNode {
+                    value: YamlValue::Alias(anchor_name.clone()),
+                    metadata: crate::document::node::NodeMetadata {
+                        text_span: None,
+                        modified: false,
+                    },
+                    anchor: None,
+                    alias_target: Some(anchor_name),
+                    original_formatting: None,
+                };
+
+                self.push_value(node);
+            }
+
+            Event::Scalar(value, style, anchor_id, _tag) => {
+                // In a mapping context, scalars alternate between keys and values
+                if let Some(BuildNode::Mapping { current_key, .. }) = self.stack.last_mut() {
+                    if current_key.is_none() {
+                        // This scalar is a key - store it in the mapping's current_key
+                        *current_key = Some(value);
+                        return;
+                    }
+                }
+
+                // This is a value (or we're not in a mapping)
+                let yaml_value = parse_scalar_value(&value);
+                let anchor_name = self.get_anchor_name(anchor_id);
+
+                let node = YamlNode {
+                    value: yaml_value,
+                    metadata: crate::document::node::NodeMetadata {
+                        text_span: None,
+                        modified: false,
+                    },
+                    anchor: anchor_name,
+                    alias_target: None,
+                    original_formatting: None,
+                };
+
+                self.push_value(node);
+            }
+
+            Event::SequenceStart(anchor_id, _tag) => {
+                let anchor_name = self.get_anchor_name(anchor_id);
+                self.stack.push(BuildNode::Sequence {
+                    elements: Vec::new(),
+                    anchor: anchor_name,
+                });
+            }
+
+            Event::SequenceEnd => {
+                if let Some(BuildNode::Sequence { elements, anchor }) = self.stack.pop() {
+                    let node = YamlNode {
+                        value: YamlValue::Array(elements),
+                        metadata: crate::document::node::NodeMetadata {
+                            text_span: None,
+                            modified: false,
+                        },
+                        anchor,
+                        alias_target: None,
+                        original_formatting: None,
+                    };
+                    self.push_value(node);
+                }
+            }
+
+            Event::MappingStart(anchor_id, _tag) => {
+                let anchor_name = self.get_anchor_name(anchor_id);
+                self.stack.push(BuildNode::Mapping {
+                    entries: IndexMap::new(),
+                    anchor: anchor_name,
+                    current_key: None,
+                });
+            }
+
+            Event::MappingEnd => {
+                if let Some(BuildNode::Mapping {
+                    entries,
+                    anchor,
+                    current_key: _,
+                }) = self.stack.pop()
+                {
+                    let node = YamlNode {
+                        value: YamlValue::Object(entries),
+                        metadata: crate::document::node::NodeMetadata {
+                            text_span: None,
+                            modified: false,
+                        },
+                        anchor,
+                        alias_target: None,
+                        original_formatting: None,
+                    };
+                    self.push_value(node);
+                }
+            }
+        }
+    }
+}
+
+/// Parse a scalar string value into a YamlValue
+fn parse_scalar_value(s: &str) -> YamlValue {
+    // Try to parse as various types
+    if s == "null" || s.is_empty() {
+        YamlValue::Null
+    } else if s == "true" {
+        YamlValue::Boolean(true)
+    } else if s == "false" {
+        YamlValue::Boolean(false)
+    } else if let Ok(i) = s.parse::<i64>() {
+        YamlValue::Number(YamlNumber::Integer(i))
+    } else if let Ok(f) = s.parse::<f64>() {
+        YamlValue::Number(YamlNumber::Float(f))
+    } else {
+        YamlValue::String(YamlString::Plain(s.to_string()))
+    }
 }
 
 /// Parses a YAML string into a `YamlNode`.
@@ -339,10 +570,10 @@ fn convert_yaml_rust2(
 /// Detects whether the input contains multiple documents (separated by `---`)
 /// and returns either a single YamlNode or a MultiDoc variant containing all documents.
 ///
-/// Uses a hybrid approach:
+/// Uses a hybrid Parser/EventReceiver approach:
 /// 1. Scanner extracts anchor/alias names from source text
-/// 2. YamlLoader parses the YAML structure
-/// 3. Correlates anchor names with parsed nodes
+/// 2. Parser generates events preserving Alias nodes
+/// 3. TreeBuilder constructs YamlNode tree from events
 ///
 /// # Arguments
 ///
@@ -370,36 +601,22 @@ fn convert_yaml_rust2(
 /// ```
 pub fn parse_yaml_auto(yaml_str: &str) -> Result<YamlNode> {
     // Pass 1: Scan for anchor/alias names
-    let anchor_map = scan_for_anchors(yaml_str);
+    let mut anchor_map = scan_for_anchors(yaml_str);
+    anchor_map.build_id_mapping();
 
-    // Pass 2: Parse YAML structure with yaml-rust2
-    let docs =
-        YamlLoader::load_from_str(yaml_str).context("Failed to parse YAML with yaml-rust2")?;
+    // Pass 2: Parse with Parser + TreeBuilder
+    let mut parser = Parser::new(yaml_str.chars());
+    let mut builder = TreeBuilder::new(anchor_map);
 
-    if docs.is_empty() {
-        bail!("No YAML documents found");
-    }
+    parser
+        .load(&mut builder, true)
+        .context("Failed to parse YAML with Parser")?;
 
-    // Build anchor ID mapping
-    // For now, we create a sequential mapping based on anchor order in the map
-    // This assumes yaml-rust2 assigns IDs in document order
-    let anchor_id_map: HashMap<usize, String> = anchor_map
-        .anchors
-        .values()
-        .enumerate()
-        .map(|(id, name)| (id, name.clone()))
-        .collect();
-
-    if docs.len() == 1 {
-        // Single document - return it directly
-        convert_yaml_rust2(&docs[0], &anchor_map, &anchor_id_map)
-    } else {
-        // Multiple documents - wrap in MultiDoc
-        let nodes: Result<Vec<YamlNode>> = docs
-            .iter()
-            .map(|doc| convert_yaml_rust2(doc, &anchor_map, &anchor_id_map))
-            .collect();
-        Ok(YamlNode::new(YamlValue::MultiDoc(nodes?)))
+    // Return single document or MultiDoc
+    match builder.documents.len() {
+        0 => bail!("No YAML documents found"),
+        1 => Ok(builder.documents.into_iter().next().unwrap()),
+        _ => Ok(YamlNode::new(YamlValue::MultiDoc(builder.documents))),
     }
 }
 

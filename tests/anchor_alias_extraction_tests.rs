@@ -214,3 +214,30 @@ production:
     // The merge key behavior depends on yaml-rust2's handling
     assert!(matches!(node.value(), YamlValue::Object(_)));
 }
+
+#[test]
+fn test_debug_parse_output() {
+    let yaml = r#"
+defaults: &config
+  timeout: 30
+
+production:
+  settings: *config
+"#;
+    let node = parse_yaml_auto(yaml).unwrap();
+
+    println!("\n=== DEBUG: Root Node ===");
+    println!("Value type: {:?}", std::mem::discriminant(node.value()));
+    
+    match node.value() {
+        YamlValue::Object(map) => {
+            println!("Object with {} keys", map.len());
+            for (key, _val) in map.iter() {
+                println!("  - Key: {}", key);
+            }
+        }
+        other => {
+            println!("Not an object: {:?}", other);
+        }
+    }
+}
