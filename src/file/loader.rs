@@ -1,22 +1,22 @@
-//! JSON file loading functionality.
+//! YAML file loading functionality.
 //!
-//! This module provides functions to load JSON documents from files or stdin,
-//! parsing them into `YamlTree` structures that can be edited by yamlquill.
+//! This module provides functions to load YAML documents from files or stdin,
+//! parsing them into `YamlNode` structures that can be edited by yamlquill.
 
-use crate::document::parser::{parse_yaml, parse_value};
+use crate::document::parser::{parse_yaml_auto, parse_yaml, parse_value};
 use crate::document::tree::YamlTree;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-/// Loads and parses a JSON file from the filesystem.
+/// Loads and parses a YAML file from the filesystem.
 ///
-/// This function reads a file from disk and parses its contents as JSON,
+/// This function reads a file from disk and parses its contents as YAML,
 /// returning a `YamlTree` structure ready for editing.
 ///
 /// # Arguments
 ///
-/// * `path` - The path to the JSON file to load
+/// * `path` - The path to the YAML file to load
 ///
 /// # Returns
 ///
@@ -30,8 +30,9 @@ use std::path::Path;
 ///
 /// ```no_run
 /// use yamlquill::file::loader::load_yaml_file;
+/// use std::path::Path;
 ///
-/// let tree = load_yaml_file("config.json").unwrap();
+/// let tree = load_yaml_file(Path::new("config.yaml")).unwrap();
 /// // tree is now ready for editing
 /// ```
 ///
@@ -42,31 +43,72 @@ use std::path::Path;
 /// - The file cannot be read (permissions, etc.)
 /// - The file contents are not valid YAML
 pub fn load_yaml_file<P: AsRef<Path>>(path: P) -> Result<YamlTree> {
-    let path_ref = path.as_ref();
+    let path = path.as_ref();
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read file: {}", path.display()))?;
 
-    // Check if file is gzipped
-    let is_gzipped = path_ref
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext == "gz")
-        .unwrap_or(false);
+    let node = parse_yaml_auto(&contents)?;
+    Ok(YamlTree::new(node))
+}
 
-    // Read content (decompress if needed)
-    let content = if is_gzipped {
-        read_gzipped_file(path_ref)?
+/// Loads and parses a YAML file with automatic gzip decompression.
+///
+/// This function reads a file from disk and parses its contents as YAML.
+/// If the file has a `.gz` extension, it will automatically decompress it first.
+///
+/// # Arguments
+///
+/// * `path` - The path to the YAML file to load (may be gzip-compressed)
+///
+/// # Returns
+///
+/// Returns a `Result` containing:
+/// - `Ok(YamlTree)` if the file was successfully loaded and parsed
+/// - `Err(anyhow::Error)` if:
+///   - The file could not be read or decompressed
+///   - The file contents are not valid YAML
+///
+/// # Examples
+///
+/// ```no_run
+/// use yamlquill::file::loader::load_yaml_file_auto;
+/// use std::path::Path;
+///
+/// // Load regular YAML file
+/// let tree = load_yaml_file_auto(Path::new("config.yaml")).unwrap();
+///
+/// // Load gzip-compressed YAML file
+/// let tree = load_yaml_file_auto(Path::new("config.yaml.gz")).unwrap();
+/// ```
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - The file path does not exist
+/// - The file cannot be read (permissions, etc.)
+/// - The gzip decompression fails (for .gz files)
+/// - The file contents are not valid YAML
+pub fn load_yaml_file_auto<P: AsRef<Path>>(path: P) -> Result<YamlTree> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+
+    let path = path.as_ref();
+    let contents = if path.extension().and_then(|s| s.to_str()) == Some("gz") {
+        // Decompress gzip file
+        let file = fs::File::open(path)
+            .with_context(|| format!("Failed to open gzip file: {}", path.display()))?;
+        let mut decoder = GzDecoder::new(file);
+        let mut contents = String::new();
+        decoder.read_to_string(&mut contents)
+            .context("Failed to decompress gzip file")?;
+        contents
     } else {
-        fs::read_to_string(path_ref).context("Failed to read file")?
+        fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file: {}", path.display()))?
     };
 
-    // Determine format from filename (before .gz)
-    let is_jsonl = determine_jsonl_format(path_ref);
-
-    // Parse accordingly
-    if is_jsonl {
-        parse_yamll_content(&content)
-    } else {
-        parse_yaml(&content).context("Failed to parse YAML")
-    }
+    let node = parse_yaml_auto(&contents)?;
+    Ok(YamlTree::new(node))
 }
 
 /// Helper function to parse multi-document YAML content (newline-delimited JSON).
@@ -145,8 +187,8 @@ pub fn load_yaml_from_stdin() -> Result<YamlTree> {
     };
 
     // Try to parse as regular YAML first
-    if let Ok(tree) = parse_yaml(&content) {
-        return Ok(tree);
+    if let Ok(node) = parse_yaml(&content) {
+        return Ok(YamlTree::new(node));
     }
 
     // If regular YAML parsing fails, try multi-document YAML format
