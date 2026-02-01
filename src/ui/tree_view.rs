@@ -331,7 +331,7 @@ impl TreeViewState {
             YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 format!("[ {} items ]", elements.len())
             }
-            YamlValue::String(s) => format!("\"{}\"", s.as_str()),
+            YamlValue::String(s) => format_yaml_string_preview(s),
             YamlValue::Number(n) => format_number_yaml(n),
             YamlValue::Boolean(b) => b.to_string(),
             YamlValue::Null => "null".to_string(),
@@ -677,6 +677,36 @@ fn format_number(n: f64) -> String {
 }
 
 /// Formats a YamlNumber for display.
+/// Formats a YAML string with style indicators.
+///
+/// - Plain strings: `"hello"`
+/// - Literal strings (|): `| line1\nline2`
+/// - Folded strings (>): `> folded text`
+fn format_yaml_string_preview(s: &crate::document::node::YamlString) -> String {
+    use crate::document::node::YamlString;
+    match s {
+        YamlString::Plain(content) => format!("\"{}\"", content),
+        YamlString::Literal(content) => {
+            // Show first line with | indicator
+            let first_line = content.lines().next().unwrap_or("");
+            if content.lines().count() > 1 {
+                format!("| {}...", first_line)
+            } else {
+                format!("| {}", first_line)
+            }
+        }
+        YamlString::Folded(content) => {
+            // Show first line with > indicator
+            let first_line = content.lines().next().unwrap_or("");
+            if content.lines().count() > 1 {
+                format!("> {}...", first_line)
+            } else {
+                format!("> {}", first_line)
+            }
+        }
+    }
+}
+
 fn format_number_yaml(n: &crate::document::node::YamlNumber) -> String {
     use crate::document::node::YamlNumber;
     match n {
@@ -705,7 +735,7 @@ pub fn format_collapsed_preview(node: &YamlNode, max_chars: usize) -> String {
             // Shouldn't happen, but treat like array
             format_collapsed_array(lines, max_chars)
         }
-        YamlValue::String(s) => format!("\"{}\"", s.as_str()),
+        YamlValue::String(s) => format_yaml_string_preview(s),
         YamlValue::Number(n) => format_number_yaml(n),
         YamlValue::Boolean(b) => format!("{}", b),
         YamlValue::Null => "null".to_string(),
