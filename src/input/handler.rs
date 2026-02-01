@@ -624,8 +624,52 @@ impl InputHandler {
                                 state.cursor_to_bottom_of_screen();
                                 return Ok(false);
                             }
+                            'a' => {
+                                // za - toggle fold at cursor
+                                state.clear_pending();
+                                state.clear_search_results();
+                                state.toggle_expand_at_cursor();
+                                return Ok(false);
+                            }
+                            'M' => {
+                                // zM - collapse all nodes
+                                state.clear_pending();
+                                state.clear_search_results();
+                                state.collapse_all_at_cursor();
+                                return Ok(false);
+                            }
+                            'R' => {
+                                // zR - expand all nodes
+                                state.clear_pending();
+                                state.clear_search_results();
+                                state.expand_all_at_cursor();
+                                return Ok(false);
+                            }
+                            'c' => {
+                                // zc - collapse current subtree
+                                state.clear_pending();
+                                state.clear_search_results();
+                                state.collapse_all_at_cursor();
+                                return Ok(false);
+                            }
                             _ => {
-                                // Not a screen positioning command, continue with normal processing
+                                // Not a screen positioning or fold command, continue with normal processing
+                            }
+                        }
+                    }
+
+                    // Handle navigation commands (gp)
+                    if state.pending_command() == Some('g') {
+                        match c {
+                            'p' => {
+                                // gp - jump to parent node
+                                state.clear_pending();
+                                state.clear_search_results();
+                                state.move_to_parent();
+                                return Ok(false);
+                            }
+                            _ => {
+                                // Not a 'g' navigation command, continue with normal processing
                             }
                         }
                     }
