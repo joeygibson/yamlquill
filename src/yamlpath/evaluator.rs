@@ -386,22 +386,23 @@ impl<'a> Evaluator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::node::{YamlString, YamlNumber};
+    use indexmap::IndexMap;
 
     fn make_test_tree() -> YamlNode {
         let items = vec![
-            YamlNode::new(YamlValue::String("a".to_string())),
-            YamlNode::new(YamlValue::String("b".to_string())),
-            YamlNode::new(YamlValue::String("c".to_string())),
+            YamlNode::new(YamlValue::String(YamlString::Plain("a".to_string()))),
+            YamlNode::new(YamlValue::String(YamlString::Plain("b".to_string()))),
+            YamlNode::new(YamlValue::String(YamlString::Plain("c".to_string()))),
         ];
 
-        let obj = vec![
-            (
-                "name".to_string(),
-                YamlNode::new(YamlValue::String("test".to_string())),
-            ),
-            ("age".to_string(), YamlNode::new(YamlValue::Number(42.0))),
-            ("items".to_string(), YamlNode::new(YamlValue::Array(items))),
-        ];
+        let mut obj = IndexMap::new();
+        obj.insert(
+            "name".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))),
+        );
+        obj.insert("age".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(42.0))));
+        obj.insert("items".to_string(), YamlNode::new(YamlValue::Array(items)));
 
         YamlNode::new(YamlValue::Object(obj))
     }
@@ -422,7 +423,7 @@ mod tests {
         let results =
             evaluator.evaluate(&[PathSegment::Root, PathSegment::Child("name".to_string())]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &YamlValue::String("test".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String(YamlString::Plain("test".to_string())));
     }
 
     #[test]
@@ -435,7 +436,7 @@ mod tests {
             PathSegment::Index(1),
         ]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &YamlValue::String("b".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String(YamlString::Plain("b".to_string())));
     }
 
     #[test]
@@ -463,7 +464,7 @@ mod tests {
             PathSegment::RecursiveDescent(Some("name".to_string())),
         ]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &YamlValue::String("test".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String(YamlString::Plain("test".to_string())));
     }
 
     #[test]
@@ -476,7 +477,7 @@ mod tests {
             PathSegment::Index(0),
         ]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &YamlValue::String("a".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String(YamlString::Plain("a".to_string())));
     }
 
     #[test]
@@ -489,7 +490,7 @@ mod tests {
             PathSegment::Index(-1),
         ]);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), &YamlValue::String("c".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String(YamlString::Plain("c".to_string())));
     }
 
     #[test]
@@ -502,8 +503,8 @@ mod tests {
             PathSegment::Slice(Some(0), Some(2)),
         ]);
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].value(), &YamlValue::String("a".to_string()));
-        assert_eq!(results[1].value(), &YamlValue::String("b".to_string()));
+        assert_eq!(results[0].value(), &YamlValue::String(YamlString::Plain("a".to_string())));
+        assert_eq!(results[1].value(), &YamlValue::String(YamlString::Plain("b".to_string())));
     }
 
     #[test]
@@ -527,8 +528,8 @@ mod tests {
         ]);
         assert_eq!(results.len(), 2); // Should find both name and age
                                       // Verify we got the right values
-        assert_eq!(results[0].value(), &YamlValue::String("test".to_string()));
-        assert_eq!(results[1].value(), &YamlValue::Number(42.0));
+        assert_eq!(results[0].value(), &YamlValue::String(YamlString::Plain("test".to_string())));
+        assert_eq!(results[1].value(), &YamlValue::Number(YamlNumber::Float(42.0)));
     }
 
     #[test]
