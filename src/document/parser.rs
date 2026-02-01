@@ -1,170 +1,39 @@
 //! YAML parsing with metadata preservation.
 //!
-//! This module provides functionality to parse YAML strings into `YamlTree` structures
-//! while preserving formatting metadata. The parser converts standard YAML into our
-//! internal representation that tracks modification status and text spans for
-//! format-preserving edits.
+//! This module provides functionality to parse YAML strings into `YamlNode` structures
+//! using serde_yaml. The parser converts standard YAML into our internal representation
+//! that tracks modification status for format-preserving edits.
+//!
+//! # Phase 1 Scope
+//!
+//! - Single document YAML only (multi-document support in Phase 3)
+//! - All strings treated as Plain style (literal/folded detection in Phase 4)
+//! - Basic value conversion without text span tracking (spans in Phase 4)
 //!
 //! # Example
 //!
 //! ```
 //! use yamlquill::document::parser::parse_yaml;
 //!
-//! let json = r#"{"name": "Alice", "age": 30}"#;
-//! let tree = parse_yaml(json).unwrap();
-//!
-//! // Navigate to the first field
-//! let name_node = tree.get_node(&[0]).unwrap();
+//! let yaml = "name: Alice\nage: 30";
+//! let node = parse_yaml(yaml).unwrap();
 //! ```
 
-use super::node::{YamlNode, YamlValue, NodeMetadata, TextSpan};
-use super::tree::YamlTree;
-use anyhow::{Context, Result};
-use serde_yaml::Value as SerdeValue;
+use serde_yaml::{self, Value};
+use indexmap::IndexMap;
+use crate::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
+use anyhow::{Result, Context};
 
-/// Tracks byte positions while parsing JSON.
-struct SpanTracker<'a> {
-    source: &'a str,
-    pos: usize,
-}
-
-impl<'a> SpanTracker<'a> {
-    fn new(source: &'a str) -> Self {
-        Self { source, pos: 0 }
-    }
-
-    /// Skip whitespace characters
-    fn skip_whitespace(&mut self) {
-        while self.pos < self.source.len() {
-            let ch = self.source.as_bytes()[self.pos];
-            if ch == b' ' || ch == b'\n' || ch == b'\r' || ch == b'\t' {
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-    }
-
-    /// Find the span of a value in the source
-    fn find_value_span(&mut self, value: &SerdeValue) -> TextSpan {
-        self.skip_whitespace();
-        let start = self.pos;
-
-        // Calculate end position based on value type
-        let end = match value {
-            SerdeValue::Null => {
-                self.pos += 4; // "null"
-                self.pos
-            }
-            SerdeValue::Bool(true) => {
-                self.pos += 4; // "true"
-                self.pos
-            }
-            SerdeValue::Bool(false) => {
-                self.pos += 5; // "false"
-                self.pos
-            }
-            SerdeValue::Number(_) => self.find_number_end(),
-            SerdeValue::String(_) => self.find_string_end(),
-            SerdeValue::Array(_) => self.find_container_end('[', ']'),
-            SerdeValue::Object(_) => self.find_container_end('{', '}'),
-        };
-
-        TextSpan { start, end }
-    }
-
-    /// Find the end of a number
-    fn find_number_end(&mut self) -> usize {
-        while self.pos < self.source.len() {
-            let ch = self.source.as_bytes()[self.pos];
-            if ch.is_ascii_digit()
-                || ch == b'-'
-                || ch == b'+'
-                || ch == b'.'
-                || ch == b'e'
-                || ch == b'E'
-            {
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-        self.pos
-    }
-
-    /// Find the end of a string
-    fn find_string_end(&mut self) -> usize {
-        if self.source.as_bytes()[self.pos] == b'"' {
-            self.pos += 1; // Skip opening quote
-
-            while self.pos < self.source.len() {
-                match self.source.as_bytes()[self.pos] {
-                    b'\\' => {
-                        self.pos += 1; // Move past backslash
-                        if self.pos < self.source.len() {
-                            let next_byte = self.source.as_bytes()[self.pos];
-                            if next_byte == b'u' {
-                                self.pos += 5; // \uXXXX is 6 bytes total, already moved past \
-                            } else {
-                                self.pos += 1; // Standard 2-byte escape
-                            }
-                        }
-                    }
-                    b'"' => {
-                        self.pos += 1; // Skip closing quote
-                        break;
-                    }
-                    _ => {
-                        self.pos += 1;
-                    }
-                }
-            }
-        }
-        self.pos
-    }
-
-    /// Find the end of a container (array or object)
-    fn find_container_end(&mut self, open: char, close: char) -> usize {
-        let mut depth = 0;
-        let mut in_string = false;
-        let mut escape_next = false;
-
-        while self.pos < self.source.len() {
-            let ch = self.source[self.pos..].chars().next().unwrap_or('\0');
-
-            if escape_next {
-                escape_next = false;
-                self.pos += ch.len_utf8();
-                continue;
-            }
-
-            match ch {
-                '\\' if in_string => escape_next = true,
-                '"' => in_string = !in_string,
-                c if c == open && !in_string => depth += 1,
-                c if c == close && !in_string => {
-                    depth -= 1;
-                    self.pos += ch.len_utf8();
-                    if depth == 0 {
-                        break;
-                    }
-                    continue;
-                }
-                _ => {}
-            }
-
-            self.pos += ch.len_utf8();
-        }
-
-        self.pos
-    }
-}
-
-/// Parses a YAML string into a `YamlTree`.
+/// Parses a YAML string into a `YamlNode`.
 ///
-/// This function uses `serde_json` to parse the YAML string, then converts
-/// the result into our internal `YamlTree` structure with metadata tracking.
-/// The root node will have its text_span populated by the span tracker for format-preserving edits.
+/// This function uses `serde_yaml` to parse the YAML string, then converts
+/// the result into our internal `YamlNode` structure with metadata tracking.
+///
+/// # Phase 1 Limitations
+///
+/// - Single document only (multi-document in Phase 3)
+/// - All strings treated as Plain style (literal/folded detection in Phase 4)
+/// - No text span tracking (added in Phase 4)
 ///
 /// # Arguments
 ///
@@ -173,14 +42,8 @@ impl<'a> SpanTracker<'a> {
 /// # Returns
 ///
 /// Returns a `Result` containing:
-/// - `Ok(YamlTree)` if parsing succeeds
+/// - `Ok(YamlNode)` if parsing succeeds
 /// - `Err(anyhow::Error)` if the YAML is malformed
-///
-/// # Note on Number Precision
-///
-/// YAML numbers are stored as `f64` internally. This means very large integers
-/// (beyond 2^53 - 1) may lose precision during parsing. If exact integer precision
-/// is required for large numbers, consider using string representations instead
 ///
 /// # Example
 ///
@@ -188,11 +51,11 @@ impl<'a> SpanTracker<'a> {
 /// use yamlquill::document::parser::parse_yaml;
 /// use yamlquill::document::node::YamlValue;
 ///
-/// let json = r#"{"name": "Alice"}"#;
-/// let tree = parse_yaml(json).unwrap();
+/// let yaml = "name: Alice";
+/// let node = parse_yaml(yaml).unwrap();
 ///
 /// // Root should be an object
-/// assert!(tree.root().value().is_object());
+/// assert!(node.value().is_object());
 /// ```
 ///
 /// # Errors
@@ -200,121 +63,18 @@ impl<'a> SpanTracker<'a> {
 /// This function will return an error if:
 /// - The input string is not valid YAML
 /// - The YAML contains syntax errors
-///
-/// # Examples
-///
-/// Parsing a simple object:
-/// ```
-/// use yamlquill::document::parser::parse_yaml;
-///
-/// let json = r#"{"key": "value"}"#;
-/// let tree = parse_yaml(json).unwrap();
-/// ```
-///
-/// Parsing an array:
-/// ```
-/// use yamlquill::document::parser::parse_yaml;
-///
-/// let json = r#"[1, 2, 3]"#;
-/// let tree = parse_yaml(json).unwrap();
-/// ```
-///
-/// Handling errors:
-/// ```
-/// use yamlquill::document::parser::parse_yaml;
-///
-/// let invalid_yaml = r#"{"unclosed": "#;
-/// assert!(parse_yaml(invalid_yaml).is_err());
-/// ```
-pub fn parse_yaml(yaml_str: &str) -> Result<YamlTree> {
-    let serde_value: SerdeValue = serde_yaml::from_str(yaml_str).context("Failed to parse YAML")?;
+/// - The YAML uses tagged values (not supported in v1)
+pub fn parse_yaml(yaml_str: &str) -> Result<YamlNode> {
+    let value: Value = serde_yaml::from_str(yaml_str)
+        .context("Failed to parse YAML")?;
 
-    let mut tracker = SpanTracker::new(yaml_str);
-    let root = convert_with_spans(&serde_value, &mut tracker);
-
-    Ok(YamlTree::with_source(root, Some(yaml_str.to_string())))
-}
-
-/// Converts a serde_yaml::Value to YamlNode with span tracking.
-fn convert_with_spans(value: &SerdeValue, tracker: &mut SpanTracker) -> YamlNode {
-    let span = tracker.find_value_span(value);
-
-    let yaml_value = match value {
-        SerdeValue::Object(map) => {
-            tracker.pos = span.start + 1; // Skip opening brace
-            let entries = map
-                .iter()
-                .map(|(k, v)| {
-                    tracker.skip_whitespace();
-                    // Skip the key string
-                    tracker.find_string_end();
-                    tracker.skip_whitespace();
-                    // Skip the colon
-                    if tracker.pos < tracker.source.len()
-                        && tracker.source.as_bytes()[tracker.pos] == b':'
-                    {
-                        tracker.pos += 1;
-                    }
-                    tracker.skip_whitespace();
-
-                    let node = convert_with_spans(v, tracker);
-
-                    tracker.skip_whitespace();
-                    // Skip comma if present
-                    if tracker.pos < tracker.source.len()
-                        && tracker.source.as_bytes()[tracker.pos] == b','
-                    {
-                        tracker.pos += 1;
-                    }
-
-                    (k.clone(), node)
-                })
-                .collect();
-            // CRITICAL: Restore position to end of container after processing children
-            tracker.pos = span.end;
-            YamlValue::Object(entries)
-        }
-        SerdeValue::Array(arr) => {
-            tracker.pos = span.start + 1; // Skip opening bracket
-            let elements = arr
-                .iter()
-                .map(|v| {
-                    tracker.skip_whitespace();
-                    let node = convert_with_spans(v, tracker);
-                    tracker.skip_whitespace();
-                    // Skip comma if present
-                    if tracker.pos < tracker.source.len()
-                        && tracker.source.as_bytes()[tracker.pos] == b','
-                    {
-                        tracker.pos += 1;
-                    }
-                    node
-                })
-                .collect();
-            // CRITICAL: Restore position to end of container after processing children
-            tracker.pos = span.end;
-            YamlValue::Array(elements)
-        }
-        SerdeValue::String(s) => YamlValue::String(s.clone()),
-        SerdeValue::Number(n) => YamlValue::Number(n.as_f64().unwrap_or(0.0)),
-        SerdeValue::Bool(b) => YamlValue::Boolean(*b),
-        SerdeValue::Null => YamlValue::Null,
-    };
-
-    YamlNode {
-        value: yaml_value,
-        metadata: NodeMetadata {
-            text_span: Some(span),
-            modified: false,
-        },
-    }
+    convert_value(value)
 }
 
 /// Converts a `serde_yaml::Value` into a `YamlNode`.
 ///
-/// This is a recursive function that traverses the serde_json value tree
+/// This is a recursive function that traverses the serde_yaml value tree
 /// and converts each value into our internal representation with metadata.
-/// Text spans will be added by the span tracker in a later implementation phase.
 ///
 /// # Arguments
 ///
@@ -322,40 +82,136 @@ fn convert_with_spans(value: &SerdeValue, tracker: &mut SpanTracker) -> YamlNode
 ///
 /// # Returns
 ///
-/// Returns a `YamlNode` with:
-/// - The converted value
-/// - `modified: false` (since it's freshly parsed, not user-modified)
-/// - `text_span: None` (will be populated by span tracker later)
-pub fn parse_value(value: &SerdeValue) -> YamlNode {
-    convert_serde_value_impl(value)
-}
-
-fn convert_serde_value_impl(value: &SerdeValue) -> YamlNode {
+/// Returns a `Result` containing:
+/// - `Ok(YamlNode)` with the converted value
+/// - `Err(anyhow::Error)` if the value type is not supported
+///
+/// # Type Conversions
+///
+/// - `Value::Null` → `YamlValue::Null`
+/// - `Value::Bool` → `YamlValue::Boolean`
+/// - `Value::Number` → `YamlValue::Number` (Integer or Float)
+/// - `Value::String` → `YamlValue::String(YamlString::Plain)`
+/// - `Value::Sequence` → `YamlValue::Array`
+/// - `Value::Mapping` → `YamlValue::Object` (using IndexMap for order)
+/// - `Value::Tagged` → Error (not supported in v1)
+///
+/// # Number Handling
+///
+/// Numbers are checked with `as_i64()` first to preserve integer types,
+/// falling back to `as_f64()` for floating-point values.
+fn convert_value(value: Value) -> Result<YamlNode> {
     let yaml_value = match value {
-        SerdeValue::Object(map) => {
-            let entries = map
-                .iter()
-                .map(|(k, v)| (k.clone(), convert_serde_value_impl(v)))
+        Value::Null => YamlValue::Null,
+
+        Value::Bool(b) => YamlValue::Boolean(b),
+
+        Value::Number(n) => {
+            // Try to preserve integer type
+            if let Some(i) = n.as_i64() {
+                YamlValue::Number(YamlNumber::Integer(i))
+            } else if let Some(f) = n.as_f64() {
+                YamlValue::Number(YamlNumber::Float(f))
+            } else {
+                // Fallback for u64 values that don't fit in i64
+                YamlValue::Number(YamlNumber::Float(n.as_f64().unwrap_or(0.0)))
+            }
+        }
+
+        Value::String(s) => {
+            // Phase 1: Treat all strings as Plain
+            // Phase 4 will add detection for Literal (|) and Folded (>)
+            YamlValue::String(YamlString::Plain(s))
+        }
+
+        Value::Sequence(seq) => {
+            let elements: Result<Vec<YamlNode>> = seq
+                .into_iter()
+                .map(convert_value)
                 .collect();
+            YamlValue::Array(elements?)
+        }
+
+        Value::Mapping(map) => {
+            let mut entries = IndexMap::new();
+            for (k, v) in map {
+                // Convert key to string
+                let key = match k {
+                    Value::String(s) => s,
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Null => "null".to_string(),
+                    _ => anyhow::bail!("Complex mapping keys are not supported"),
+                };
+                entries.insert(key, convert_value(v)?);
+            }
             YamlValue::Object(entries)
         }
-        SerdeValue::Array(arr) => {
-            let elements = arr.iter().map(convert_serde_value_impl).collect();
-            YamlValue::Array(elements)
+
+        Value::Tagged(tagged) => {
+            anyhow::bail!("Tagged values are not supported in v1: !{}", tagged.tag)
         }
-        SerdeValue::String(s) => YamlValue::String(s.clone()),
-        SerdeValue::Number(n) => YamlValue::Number(n.as_f64().unwrap_or(0.0)),
-        SerdeValue::Bool(b) => YamlValue::Boolean(*b),
-        SerdeValue::Null => YamlValue::Null,
     };
 
-    YamlNode {
+    // Parsed nodes are marked as not modified
+    Ok(YamlNode {
         value: yaml_value,
-        metadata: NodeMetadata {
+        metadata: crate::document::node::NodeMetadata {
             text_span: None,
             modified: false,
         },
-    }
+        anchor: None,
+        original_formatting: None,
+    })
+}
+
+/// Parses YAML with automatic single/multi-document detection.
+///
+/// # Phase 1 Implementation
+///
+/// Currently just delegates to `parse_yaml()` for single-document support.
+/// Phase 3 will add true multi-document support using `serde_yaml::Deserializer`.
+///
+/// # Arguments
+///
+/// * `yaml_str` - A string slice containing valid YAML
+///
+/// # Returns
+///
+/// Returns a `Result` containing:
+/// - `Ok(YamlNode)` if parsing succeeds
+/// - `Err(anyhow::Error)` if the YAML is malformed
+pub fn parse_yaml_auto(yaml_str: &str) -> Result<YamlNode> {
+    // V1: Single document only
+    // Phase 3 will add multi-document support
+    parse_yaml(yaml_str)
+}
+
+/// Converts a `serde_yaml::Value` reference into a `YamlNode`.
+///
+/// This is a compatibility function used by file loaders for multi-document YAML support.
+/// It delegates to `convert_value` after cloning the value.
+///
+/// # Arguments
+///
+/// * `value` - A reference to the `serde_yaml::Value` to convert
+///
+/// # Returns
+///
+/// Returns a `YamlNode` with the converted value
+pub fn parse_value(value: &Value) -> YamlNode {
+    // Clone and convert - if conversion fails, create a null node
+    convert_value(value.clone()).unwrap_or_else(|_| {
+        YamlNode {
+            value: YamlValue::Null,
+            metadata: crate::document::node::NodeMetadata {
+                text_span: None,
+                modified: false,
+            },
+            anchor: None,
+            original_formatting: None,
+        }
+    })
 }
 
 #[cfg(test)]
@@ -363,94 +219,131 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_simple_string() {
-        let json = r#""hello""#;
-        let tree = parse_yaml(json).unwrap();
+    fn test_parse_null() {
+        let yaml = "null";
+        let node = parse_yaml(yaml).unwrap();
+        assert!(matches!(node.value(), YamlValue::Null));
+        assert!(!node.is_modified());
+    }
 
-        match tree.root().value() {
-            YamlValue::String(s) => assert_eq!(s, "hello"),
+    #[test]
+    fn test_parse_boolean_true() {
+        let yaml = "true";
+        let node = parse_yaml(yaml).unwrap();
+        assert!(matches!(node.value(), YamlValue::Boolean(true)));
+    }
+
+    #[test]
+    fn test_parse_boolean_false() {
+        let yaml = "false";
+        let node = parse_yaml(yaml).unwrap();
+        assert!(matches!(node.value(), YamlValue::Boolean(false)));
+    }
+
+    #[test]
+    fn test_parse_integer() {
+        let yaml = "42";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Number(YamlNumber::Integer(i)) => assert_eq!(*i, 42),
+            _ => panic!("Expected integer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_negative_integer() {
+        let yaml = "-100";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Number(YamlNumber::Integer(i)) => assert_eq!(*i, -100),
+            _ => panic!("Expected integer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_float() {
+        let yaml = "3.14";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Number(YamlNumber::Float(f)) => assert_eq!(*f, 3.14),
+            _ => panic!("Expected float"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string() {
+        let yaml = r#""hello world""#;
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::String(YamlString::Plain(s)) => assert_eq!(s, "hello world"),
             _ => panic!("Expected string"),
         }
     }
 
     #[test]
-    fn test_parse_number() {
-        let json = "42.5";
-        let tree = parse_yaml(json).unwrap();
-
-        match tree.root().value() {
-            YamlValue::Number(n) => assert_eq!(*n, 42.5),
-            _ => panic!("Expected number"),
-        }
-    }
-
-    #[test]
-    fn test_parse_boolean() {
-        let json = "true";
-        let tree = parse_yaml(json).unwrap();
-
-        match tree.root().value() {
-            YamlValue::Boolean(b) => assert!(*b),
-            _ => panic!("Expected boolean"),
-        }
-    }
-
-    #[test]
-    fn test_parse_null() {
-        let json = "null";
-        let tree = parse_yaml(json).unwrap();
-
-        assert!(matches!(tree.root().value(), YamlValue::Null));
-    }
-
-    #[test]
-    fn test_parse_empty_object() {
-        let json = "{}";
-        let tree = parse_yaml(json).unwrap();
-
-        match tree.root().value() {
-            YamlValue::Object(entries) => assert_eq!(entries.len(), 0),
-            _ => panic!("Expected object"),
+    fn test_parse_plain_string() {
+        let yaml = "unquoted string";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::String(YamlString::Plain(s)) => assert_eq!(s, "unquoted string"),
+            _ => panic!("Expected string"),
         }
     }
 
     #[test]
     fn test_parse_empty_array() {
-        let json = "[]";
-        let tree = parse_yaml(json).unwrap();
-
-        match tree.root().value() {
+        let yaml = "[]";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
             YamlValue::Array(elements) => assert_eq!(elements.len(), 0),
             _ => panic!("Expected array"),
         }
     }
 
     #[test]
+    fn test_parse_array_with_elements() {
+        let yaml = "[1, 2, 3]";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Array(elements) => {
+                assert_eq!(elements.len(), 3);
+                match elements[0].value() {
+                    YamlValue::Number(YamlNumber::Integer(i)) => assert_eq!(*i, 1),
+                    _ => panic!("Expected integer"),
+                }
+            }
+            _ => panic!("Expected array"),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_object() {
+        let yaml = "{}";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Object(map) => assert_eq!(map.len(), 0),
+            _ => panic!("Expected object"),
+        }
+    }
+
+    #[test]
     fn test_parse_object_with_fields() {
-        let json = r#"{"name": "Alice", "age": 30, "active": true}"#;
-        let tree = parse_yaml(json).unwrap();
+        let yaml = "name: Alice\nage: 30";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Object(map) => {
+                assert_eq!(map.len(), 2);
 
-        match tree.root().value() {
-            YamlValue::Object(entries) => {
-                assert_eq!(entries.len(), 3);
-                assert_eq!(entries[0].0, "name");
-                assert_eq!(entries[1].0, "age");
-                assert_eq!(entries[2].0, "active");
-
-                // Check values
-                match entries[0].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "Alice"),
+                let name = map.get("name").unwrap();
+                match name.value() {
+                    YamlValue::String(YamlString::Plain(s)) => assert_eq!(s, "Alice"),
                     _ => panic!("Expected string"),
                 }
 
-                match entries[1].1.value() {
-                    YamlValue::Number(n) => assert_eq!(*n, 30.0),
-                    _ => panic!("Expected number"),
-                }
-
-                match entries[2].1.value() {
-                    YamlValue::Boolean(b) => assert!(*b),
-                    _ => panic!("Expected boolean"),
+                let age = map.get("age").unwrap();
+                match age.value() {
+                    YamlValue::Number(YamlNumber::Integer(i)) => assert_eq!(*i, 30),
+                    _ => panic!("Expected integer"),
                 }
             }
             _ => panic!("Expected object"),
@@ -458,56 +351,47 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_array_with_elements() {
-        let json = r#"[1, "two", true, null]"#;
-        let tree = parse_yaml(json).unwrap();
+    fn test_parse_nested_object() {
+        let yaml = r#"
+user:
+  name: Bob
+  email: bob@example.com
+"#;
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Object(map) => {
+                let user = map.get("user").unwrap();
+                match user.value() {
+                    YamlValue::Object(user_map) => {
+                        assert_eq!(user_map.len(), 2);
+                        assert!(user_map.contains_key("name"));
+                        assert!(user_map.contains_key("email"));
+                    }
+                    _ => panic!("Expected nested object"),
+                }
+            }
+            _ => panic!("Expected object"),
+        }
+    }
 
-        match tree.root().value() {
+    #[test]
+    fn test_parse_array_of_objects() {
+        let yaml = r#"
+- name: Alice
+  age: 30
+- name: Bob
+  age: 25
+"#;
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
             YamlValue::Array(elements) => {
-                assert_eq!(elements.len(), 4);
+                assert_eq!(elements.len(), 2);
 
-                assert!(matches!(elements[0].value(), YamlValue::Number(n) if *n == 1.0));
-                assert!(matches!(elements[1].value(), YamlValue::String(s) if s == "two"));
-                assert!(matches!(elements[2].value(), YamlValue::Boolean(true)));
-                assert!(matches!(elements[3].value(), YamlValue::Null));
-            }
-            _ => panic!("Expected array"),
-        }
-    }
-
-    #[test]
-    fn test_parse_nested_objects() {
-        let json = r#"{"user": {"name": "Bob", "email": "bob@example.com"}}"#;
-        let tree = parse_yaml(json).unwrap();
-
-        // Navigate to nested object
-        let user_node = tree.get_node(&[0]).unwrap();
-        match user_node.value() {
-            YamlValue::Object(entries) => {
-                assert_eq!(entries.len(), 2);
-                assert_eq!(entries[0].0, "name");
-                assert_eq!(entries[1].0, "email");
-            }
-            _ => panic!("Expected nested object"),
-        }
-    }
-
-    #[test]
-    fn test_parse_nested_arrays() {
-        let json = r#"[[1, 2], [3, 4], [5, 6]]"#;
-        let tree = parse_yaml(json).unwrap();
-
-        // Check that root is an array
-        match tree.root().value() {
-            YamlValue::Array(outer) => {
-                assert_eq!(outer.len(), 3);
-
-                // Check first nested array
-                match outer[0].value() {
-                    YamlValue::Array(inner) => {
-                        assert_eq!(inner.len(), 2);
+                match elements[0].value() {
+                    YamlValue::Object(map) => {
+                        assert_eq!(map.len(), 2);
                     }
-                    _ => panic!("Expected nested array"),
+                    _ => panic!("Expected object in array"),
                 }
             }
             _ => panic!("Expected array"),
@@ -515,107 +399,105 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_complex_nested_structure() {
-        let json = r#"{
-            "users": [
-                {"name": "Alice", "age": 30},
-                {"name": "Bob", "age": 25}
-            ],
-            "metadata": {
-                "count": 2,
-                "active": true
-            }
-        }"#;
-
-        let tree = parse_yaml(json).unwrap();
-
-        match tree.root().value() {
-            YamlValue::Object(entries) => {
-                assert_eq!(entries.len(), 2);
-                assert_eq!(entries[0].0, "users");
-                assert_eq!(entries[1].0, "metadata");
-
-                // Check users array
-                match entries[0].1.value() {
-                    YamlValue::Array(users) => {
-                        assert_eq!(users.len(), 2);
-                    }
-                    _ => panic!("Expected array"),
-                }
-
-                // Check metadata object
-                match entries[1].1.value() {
-                    YamlValue::Object(meta) => {
-                        assert_eq!(meta.len(), 2);
-                    }
-                    _ => panic!("Expected object"),
-                }
+    fn test_parse_preserves_key_order() {
+        let yaml = "z: 1\na: 2\nm: 3";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Object(map) => {
+                let keys: Vec<&String> = map.keys().collect();
+                assert_eq!(keys, vec!["z", "a", "m"]);
             }
             _ => panic!("Expected object"),
         }
-    }
-
-    #[test]
-    fn test_parse_invalid_yaml() {
-        let invalid_cases = vec![
-            r#"{"unclosed": "#,
-            r#"{"key": }"#,
-            r#"{key: "value"}"#, // Unquoted key
-            r#"[1, 2,"#,
-            r#"{"trailing": "comma",}"#,
-        ];
-
-        for invalid in invalid_cases {
-            let result = parse_yaml(invalid);
-            assert!(result.is_err(), "Expected error for: {}", invalid);
-        }
-    }
-
-    #[test]
-    fn test_parse_initializes_metadata() {
-        let json = r#"{"name": "Alice"}"#;
-        let tree = parse_yaml(json).unwrap();
-
-        // Root node should have text span populated by span tracker
-        assert!(tree.root().metadata.text_span.is_some());
-        // Parsed nodes should not be marked as modified
-        assert!(!tree.root().is_modified());
     }
 
     #[test]
     fn test_parse_nodes_not_modified() {
-        let json = r#"{"name": "Alice"}"#;
-        let tree = parse_yaml(json).unwrap();
-
-        // Parsed nodes should not be marked as modified
-        assert!(!tree.root().is_modified());
+        let yaml = "name: Alice";
+        let node = parse_yaml(yaml).unwrap();
+        assert!(!node.is_modified());
     }
 
     #[test]
-    fn test_parse_special_characters() {
-        let json = r#"{"text": "Hello\nWorld", "emoji": "😀", "quote": "Say \"hi\""}"#;
-        let tree = parse_yaml(json).unwrap();
+    fn test_parse_invalid_yaml() {
+        let invalid = "{ invalid yaml: [";
+        let result = parse_yaml(invalid);
+        assert!(result.is_err());
+    }
 
-        match tree.root().value() {
-            YamlValue::Object(entries) => {
-                assert_eq!(entries.len(), 3);
+    #[test]
+    fn test_parse_yaml_auto_single_doc() {
+        let yaml = "name: Alice";
+        let node = parse_yaml_auto(yaml).unwrap();
+        match node.value() {
+            YamlValue::Object(map) => {
+                assert_eq!(map.len(), 1);
+            }
+            _ => panic!("Expected object"),
+        }
+    }
 
-                // Check newline
-                match entries[0].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "Hello\nWorld"),
-                    _ => panic!("Expected string"),
-                }
+    #[test]
+    fn test_convert_value_null() {
+        let value = Value::Null;
+        let node = convert_value(value).unwrap();
+        assert!(matches!(node.value(), YamlValue::Null));
+    }
 
-                // Check emoji
-                match entries[1].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "😀"),
-                    _ => panic!("Expected string"),
-                }
+    #[test]
+    fn test_convert_value_bool() {
+        let value = Value::Bool(true);
+        let node = convert_value(value).unwrap();
+        assert!(matches!(node.value(), YamlValue::Boolean(true)));
+    }
 
-                // Check escaped quotes
-                match entries[2].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "Say \"hi\""),
-                    _ => panic!("Expected string"),
+    #[test]
+    fn test_convert_value_integer() {
+        let value = Value::Number(serde_yaml::Number::from(42));
+        let node = convert_value(value).unwrap();
+        match node.value() {
+            YamlValue::Number(YamlNumber::Integer(i)) => assert_eq!(*i, 42),
+            _ => panic!("Expected integer"),
+        }
+    }
+
+    #[test]
+    fn test_convert_value_float() {
+        let value = Value::Number(serde_yaml::Number::from(3.14));
+        let node = convert_value(value).unwrap();
+        match node.value() {
+            YamlValue::Number(YamlNumber::Float(f)) => assert!((f - 3.14).abs() < 0.001),
+            _ => panic!("Expected float"),
+        }
+    }
+
+    #[test]
+    fn test_convert_value_string() {
+        let value = Value::String("hello".to_string());
+        let node = convert_value(value).unwrap();
+        match node.value() {
+            YamlValue::String(YamlString::Plain(s)) => assert_eq!(s, "hello"),
+            _ => panic!("Expected string"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiline_string_as_plain() {
+        // Phase 1: All strings are Plain, even if they were literal/folded
+        let yaml = r#"
+description: |
+  This is a
+  literal block
+"#;
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Object(map) => {
+                let desc = map.get("description").unwrap();
+                match desc.value() {
+                    YamlValue::String(YamlString::Plain(s)) => {
+                        assert!(s.contains("This is a"));
+                    }
+                    _ => panic!("Expected plain string (Phase 1)"),
                 }
             }
             _ => panic!("Expected object"),
@@ -623,117 +505,25 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_numbers_edge_cases() {
-        let test_cases = vec![
-            ("0", 0.0),
-            ("-1", -1.0),
-            ("3.15", 3.15),
-            ("-0.5", -0.5),
-            ("1e10", 1e10),
-            ("1.5e-5", 1.5e-5),
-        ];
-
-        for (json, expected) in test_cases {
-            let tree = parse_yaml(json).unwrap();
-            match tree.root().value() {
-                YamlValue::Number(n) => assert_eq!(*n, expected),
-                _ => panic!("Expected number for: {}", json),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_deep_nesting() {
-        let json = r#"{"a": {"b": {"c": {"d": {"e": "deep"}}}}}"#;
-        let tree = parse_yaml(json).unwrap();
-
-        // Navigate deep into structure
-        let path = vec![0, 0, 0, 0, 0];
-        let deep_node = tree.get_node(&path).unwrap();
-
-        match deep_node.value() {
-            YamlValue::String(s) => assert_eq!(s, "deep"),
-            _ => panic!("Expected string at deep nesting"),
-        }
-    }
-
-    #[test]
-    fn test_parse_unicode_strings() {
-        let json = r#"{"chinese": "你好", "arabic": "مرحبا", "russian": "привет"}"#;
-        let tree = parse_yaml(json).unwrap();
-
-        match tree.root().value() {
-            YamlValue::Object(entries) => {
-                assert_eq!(entries.len(), 3);
-
-                match entries[0].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "你好"),
-                    _ => panic!("Expected string"),
-                }
-
-                match entries[1].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "مرحبا"),
-                    _ => panic!("Expected string"),
-                }
-
-                match entries[2].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "привет"),
-                    _ => panic!("Expected string"),
-                }
+    fn test_parse_numeric_key() {
+        let yaml = "123: value";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Object(map) => {
+                assert!(map.contains_key("123"));
             }
             _ => panic!("Expected object"),
         }
     }
 
     #[test]
-    fn test_parse_preserves_text_spans() {
-        let json = r#"{"name": "Alice", "age": 30}"#;
-        let tree = parse_yaml(json).unwrap();
-
-        // Root should have a span covering the entire input
-        assert!(tree.root().metadata.text_span.is_some());
-        let root_span = tree.root().metadata.text_span.unwrap();
-        assert_eq!(root_span.start, 0);
-        assert_eq!(root_span.end, json.len());
-    }
-
-    #[test]
-    fn test_parse_sets_modified_false_for_parsed_nodes() {
-        let json = r#"{"key": "value"}"#;
-        let tree = parse_yaml(json).unwrap();
-
-        // Parsed nodes should not be marked as modified
-        assert!(!tree.root().is_modified());
-    }
-
-    #[test]
-    fn test_parse_stores_original_source() {
-        let json = r#"[1, 2, 3]"#;
-        let tree = parse_yaml(json).unwrap();
-
-        assert_eq!(tree.original_source(), Some(json));
-    }
-
-    #[test]
-    fn test_parse_unicode_escape_in_string() {
-        let json = r#"{"emoji": "Hello\u0041World", "chinese": "\u4f60\u597d"}"#;
-        let tree = parse_yaml(json).unwrap();
-
-        match tree.root().value() {
-            YamlValue::Object(entries) => {
-                assert_eq!(entries.len(), 2);
-
-                // Check Unicode escape sequence \u0041 (A)
-                match entries[0].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "HelloAWorld"),
-                    _ => panic!("Expected string"),
-                }
-
-                // Check Unicode escape sequences for Chinese characters
-                match entries[1].1.value() {
-                    YamlValue::String(s) => assert_eq!(s, "你好"),
-                    _ => panic!("Expected string"),
-                }
+    fn test_parse_boolean_key() {
+        let yaml = "true: yes\nfalse: no";
+        let node = parse_yaml(yaml).unwrap();
+        match node.value() {
+            YamlValue::Object(map) => {
+                assert!(map.contains_key("true"));
+                assert!(map.contains_key("false"));
             }
             _ => panic!("Expected object"),
         }
