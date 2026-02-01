@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **YAMLQuill** is a terminal-based structural YAML editor with vim-style keybindings, forked from [JSONQuill](https://github.com/joeygibson/jsonquill). The goal is to achieve full feature parity with JSONQuill while adding support for YAML-specific features including multi-document files, anchors/aliases, and multi-line strings.
 
-**Status:** Phase 1 Complete - Core structure implemented in worktree
+**Status:** Phase 2c Complete - Value editing bugs fixed and tested
 
 ## Development Workflow
 
@@ -147,15 +147,23 @@ pub enum YamlNumber {
 
 **See:** `docs/plans/2026-01-31-phase1-core-structure.md`
 
-### Phase 2: YAML Document Model (Next)
+### Phase 2: YAML Document Model (In Progress)
 
 **Goal:** Full editing operations for single-document YAML
 
-**Tasks:**
-- Restore and update full test suite
-- Implement complete YAML editing operations
-- Improve tree navigation and display
-- Add comprehensive test coverage
+**Completed:**
+- ✅ Phase 2a: Core structure and compilation fixes (checkpoint: phase2-checkpoint1)
+- ✅ Phase 2b: Test suite fixes (checkpoint: phase2-checkpoint2)
+- ✅ Phase 2c: Value editing bug fixes (checkpoint: phase2c-complete)
+  - Fixed CRITICAL bug: string style preservation (Literal/Folded)
+  - Added input validation to prevent data corruption
+  - Added 8 comprehensive editing tests
+  - All 315 tests passing
+
+**Next:**
+- Phase 2d: Editor State Integration (registers, undo/redo)
+- Phase 2e: YAML-Aware Display (type indicators, color coding)
+- Phase 2f: Navigation Enhancements (jump commands, fold improvements)
 
 ### Phase 3: Multi-Document Support
 
