@@ -151,7 +151,7 @@ impl YamlTree {
         for &index in path {
             match current.value() {
                 YamlValue::Object(entries) => {
-                    current = &entries.get(index)?.1;
+                    current = entries.get_index(index)?.1;
                 }
                 YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                     current = elements.get(index)?;
@@ -199,15 +199,17 @@ impl YamlTree {
         let mut current = &mut self.root;
 
         for &index in path {
-            match current.value_mut() {
+            // We need to reborrow current to avoid the temporary lifetime issue
+            current = match current.value_mut() {
                 YamlValue::Object(entries) => {
-                    current = &mut entries.get_mut(index)?.1;
+                    let (_key, value) = entries.get_index_mut(index)?;
+                    value
                 }
                 YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
-                    current = elements.get_mut(index)?;
+                    elements.get_mut(index)?
                 }
                 _ => return None,
-            }
+            };
         }
 
         Some(current)
@@ -241,7 +243,7 @@ impl YamlTree {
                         entries.len()
                     ));
                 }
-                entries.remove(index);
+                entries.shift_remove_index(index);
             }
             YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 if index >= elements.len() {
@@ -301,7 +303,7 @@ impl YamlTree {
                         entries.len()
                     ));
                 }
-                entries.insert(index, (key, node));
+                entries.shift_insert(index, key, node);
             }
             _ => {
                 return Err(anyhow!("Target is not an object"));

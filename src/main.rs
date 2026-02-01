@@ -77,28 +77,34 @@ fn main() -> Result<()> {
             (tree, None, true)
         } else {
             // Interactive mode - create sample document with nested structure
-            let user_obj = vec![
-                (
-                    "name".to_string(),
-                    YamlNode::new(YamlValue::String("Alice".to_string())),
-                ),
-                (
-                    "email".to_string(),
-                    YamlNode::new(YamlValue::String("alice@example.com".to_string())),
-                ),
-            ];
+            use indexmap::IndexMap;
+            use yamlquill::document::node::{YamlNumber, YamlString};
 
-            let obj = vec![
-                (
-                    "user".to_string(),
-                    YamlNode::new(YamlValue::Object(user_obj)),
-                ),
-                ("count".to_string(), YamlNode::new(YamlValue::Number(42.0))),
-                (
-                    "active".to_string(),
-                    YamlNode::new(YamlValue::Boolean(true)),
-                ),
-            ];
+            let mut user_obj = IndexMap::new();
+            user_obj.insert(
+                "name".to_string(),
+                YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+            );
+            user_obj.insert(
+                "email".to_string(),
+                YamlNode::new(YamlValue::String(YamlString::Plain(
+                    "alice@example.com".to_string(),
+                ))),
+            );
+
+            let mut obj = IndexMap::new();
+            obj.insert(
+                "user".to_string(),
+                YamlNode::new(YamlValue::Object(user_obj)),
+            );
+            obj.insert(
+                "count".to_string(),
+                YamlNode::new(YamlValue::Number(YamlNumber::Float(42.0))),
+            );
+            obj.insert(
+                "active".to_string(),
+                YamlNode::new(YamlValue::Boolean(true)),
+            );
 
             let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
             (tree, None, false)

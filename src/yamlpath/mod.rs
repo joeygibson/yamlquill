@@ -28,7 +28,7 @@ pub mod error;
 pub mod evaluator;
 pub mod parser;
 
-pub use ast::{YamlPath, PathSegment};
+pub use ast::{PathSegment, YamlPath};
 pub use error::YamlPathError;
 pub use evaluator::Evaluator;
 pub use parser::Parser;

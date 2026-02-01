@@ -4,7 +4,7 @@
 //! atomic write operations and optional backup creation.
 
 use crate::config::Config;
-use crate::document::node::{YamlNode, YamlValue, YamlNumber};
+use crate::document::node::{YamlNode, YamlNumber, YamlValue};
 use crate::document::tree::YamlTree;
 use anyhow::{Context, Result};
 use serde_yaml::Value;
@@ -50,9 +50,7 @@ fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
 
         YamlValue::Number(n) => {
             match n {
-                YamlNumber::Integer(i) => {
-                    Value::Number(serde_yaml::Number::from(*i))
-                }
+                YamlNumber::Integer(i) => Value::Number(serde_yaml::Number::from(*i)),
                 YamlNumber::Float(f) => {
                     // serde_yaml::Number doesn't have a direct from_f64
                     // We need to serialize to f64 via serde_json compatibility
@@ -68,20 +66,14 @@ fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
         }
 
         YamlValue::Array(elements) => {
-            let seq: Result<Vec<Value>> = elements
-                .iter()
-                .map(convert_to_serde_value)
-                .collect();
+            let seq: Result<Vec<Value>> = elements.iter().map(convert_to_serde_value).collect();
             Value::Sequence(seq?)
         }
 
         YamlValue::Object(entries) => {
             let mut map = serde_yaml::Mapping::new();
             for (key, value) in entries {
-                map.insert(
-                    Value::String(key.clone()),
-                    convert_to_serde_value(value)?
-                );
+                map.insert(Value::String(key.clone()), convert_to_serde_value(value)?);
             }
             Value::Mapping(map)
         }
@@ -182,8 +174,7 @@ pub fn save_yaml_file<P: AsRef<Path>>(path: P, tree: &YamlTree, config: &Config)
     let value = convert_to_serde_value(tree.root())?;
 
     // Serialize to YAML string
-    let yaml_str = serde_yaml::to_string(&value)
-        .context("Failed to serialize YAML")?;
+    let yaml_str = serde_yaml::to_string(&value).context("Failed to serialize YAML")?;
 
     // Write atomically (compressed or uncompressed)
     write_file_atomic(path, yaml_str.as_bytes(), should_compress)?;
@@ -290,6 +281,7 @@ fn save_yamll<P: AsRef<Path>>(
 ///
 /// If the node is unmodified and has a text span, extracts the original text.
 /// Otherwise, serializes using the configured formatting.
+#[allow(dead_code)]
 fn serialize_preserving_format(
     node: &YamlNode,
     original: &str,
@@ -319,6 +311,7 @@ fn serialize_preserving_format(
 }
 
 /// Serializes an object with format preservation for children.
+#[allow(dead_code)]
 fn serialize_object_preserving(
     entries: &indexmap::IndexMap<String, YamlNode>,
     original: &str,
@@ -353,6 +346,7 @@ fn serialize_object_preserving(
 }
 
 /// Serializes an array with format preservation for children.
+#[allow(dead_code)]
 fn serialize_array_preserving(
     elements: &[YamlNode],
     original: &str,
@@ -506,18 +500,16 @@ pub fn serialize_node_jq_style(
             result
         }
         YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s.as_str())),
-        YamlValue::Number(n) => {
-            match n {
-                YamlNumber::Integer(i) => i.to_string(),
-                YamlNumber::Float(f) => {
-                    if f.fract() == 0.0 && f.is_finite() {
-                        format!("{:.0}", f)
-                    } else {
-                        f.to_string()
-                    }
+        YamlValue::Number(n) => match n {
+            YamlNumber::Integer(i) => i.to_string(),
+            YamlNumber::Float(f) => {
+                if f.fract() == 0.0 && f.is_finite() {
+                    format!("{:.0}", f)
+                } else {
+                    f.to_string()
                 }
             }
-        }
+        },
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
         YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
@@ -670,18 +662,16 @@ fn serialize_array_compact(elements: &[YamlNode]) -> String {
 fn serialize_scalar(value: &YamlValue) -> String {
     match value {
         YamlValue::String(s) => format!("\"{}\"", escape_yaml_string(s.as_str())),
-        YamlValue::Number(n) => {
-            match n {
-                YamlNumber::Integer(i) => i.to_string(),
-                YamlNumber::Float(f) => {
-                    if f.fract() == 0.0 && f.is_finite() {
-                        format!("{:.0}", f)
-                    } else {
-                        f.to_string()
-                    }
+        YamlValue::Number(n) => match n {
+            YamlNumber::Integer(i) => i.to_string(),
+            YamlNumber::Float(f) => {
+                if f.fract() == 0.0 && f.is_finite() {
+                    format!("{:.0}", f)
+                } else {
+                    f.to_string()
                 }
             }
-        }
+        },
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
         _ => panic!("serialize_scalar called on non-scalar value"),

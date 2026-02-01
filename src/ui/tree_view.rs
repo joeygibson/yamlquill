@@ -68,6 +68,7 @@ impl ValueType {
             YamlValue::Number(_) => ValueType::Number,
             YamlValue::Boolean(_) => ValueType::Boolean,
             YamlValue::Null => ValueType::Null,
+            YamlValue::Alias(_) => ValueType::String, // Treat alias as string for display
             YamlValue::MultiDoc(_) => ValueType::Array, // Treat multi-document YAML root like array for display
         }
     }
@@ -329,10 +330,11 @@ impl TreeViewState {
             YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 format!("[ {} items ]", elements.len())
             }
-            YamlValue::String(s) => format!("\"{}\"", s),
-            YamlValue::Number(n) => n.to_string(),
+            YamlValue::String(s) => format!("\"{}\"", s.as_str()),
+            YamlValue::Number(n) => format_number_yaml(n),
             YamlValue::Boolean(b) => b.to_string(),
             YamlValue::Null => "null".to_string(),
+            YamlValue::Alias(name) => format!("*{}", name),
         }
     }
 
@@ -663,11 +665,27 @@ pub fn render_tree_view(
 }
 
 /// Formats a number as an integer if it has no fractional part, otherwise as a float.
+#[allow(dead_code)]
 fn format_number(n: f64) -> String {
     if n.fract() == 0.0 {
         format!("{}", n as i64)
     } else {
         format!("{}", n)
+    }
+}
+
+/// Formats a YamlNumber for display.
+fn format_number_yaml(n: &crate::document::node::YamlNumber) -> String {
+    use crate::document::node::YamlNumber;
+    match n {
+        YamlNumber::Integer(i) => format!("{}", i),
+        YamlNumber::Float(f) => {
+            if f.fract() == 0.0 {
+                format!("{}", *f as i64)
+            } else {
+                format!("{}", f)
+            }
+        }
     }
 }
 
@@ -685,14 +703,18 @@ pub fn format_collapsed_preview(node: &YamlNode, max_chars: usize) -> String {
             // Shouldn't happen, but treat like array
             format_collapsed_array(lines, max_chars)
         }
-        YamlValue::String(s) => format!("\"{}\"", s),
-        YamlValue::Number(n) => format_number(*n),
+        YamlValue::String(s) => format!("\"{}\"", s.as_str()),
+        YamlValue::Number(n) => format_number_yaml(n),
         YamlValue::Boolean(b) => format!("{}", b),
         YamlValue::Null => "null".to_string(),
+        YamlValue::Alias(name) => format!("*{}", name),
     }
 }
 
-fn format_collapsed_object(fields: &[(String, YamlNode)], max_chars: usize) -> String {
+fn format_collapsed_object(
+    fields: &indexmap::IndexMap<String, YamlNode>,
+    max_chars: usize,
+) -> String {
     if fields.is_empty() {
         return "{…}".to_string();
     }
@@ -718,18 +740,20 @@ fn format_collapsed_object(fields: &[(String, YamlNode)], max_chars: usize) -> S
             YamlValue::Object(_) => "{…}".to_string(),
             YamlValue::Array(_) | YamlValue::MultiDoc(_) => "[…]".to_string(),
             YamlValue::String(s) => {
-                let quoted = format!("\"{}\"", s);
+                let s_str = s.as_str();
+                let quoted = format!("\"{}\"", s_str);
                 if preview.len() + quoted.len() > max_chars {
                     // Use char-based truncation to avoid UTF-8 boundary panics
-                    let truncated: String = s.chars().take(10).collect();
+                    let truncated: String = s_str.chars().take(10).collect();
                     format!("\"{}...\"", truncated)
                 } else {
                     quoted
                 }
             }
-            YamlValue::Number(n) => format_number(*n),
+            YamlValue::Number(n) => format_number_yaml(n),
             YamlValue::Boolean(b) => format!("{}", b),
             YamlValue::Null => "null".to_string(),
+            YamlValue::Alias(name) => format!("*{}", name),
         };
 
         preview.push_str(&value_str);
@@ -769,19 +793,21 @@ fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
             YamlValue::Object(_) => "{…}".to_string(),
             YamlValue::Array(_) | YamlValue::MultiDoc(_) => "[…]".to_string(),
             YamlValue::String(s) => {
-                let quoted = format!("\"{}\"", s);
+                let s_str = s.as_str();
+                let quoted = format!("\"{}\"", s_str);
                 // Check length to avoid exceeding max_chars with long strings
                 if preview.len() + quoted.len() > max_chars {
                     // Use char-based truncation to avoid UTF-8 boundary panics
-                    let truncated_str: String = s.chars().take(10).collect();
+                    let truncated_str: String = s_str.chars().take(10).collect();
                     format!("\"{}...\"", truncated_str)
                 } else {
                     quoted
                 }
             }
-            YamlValue::Number(n) => format_number(*n),
+            YamlValue::Number(n) => format_number_yaml(n),
             YamlValue::Boolean(b) => format!("{}", b),
             YamlValue::Null => "null".to_string(),
+            YamlValue::Alias(name) => format!("*{}", name),
         };
 
         preview.push_str(&value_str);

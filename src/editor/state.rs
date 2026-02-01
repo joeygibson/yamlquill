@@ -46,7 +46,7 @@ use super::marks::MarkSet;
 use super::mode::EditorMode;
 use super::registers::RegisterSet;
 use super::repeat::RepeatableCommand;
-use crate::document::node::{YamlNode, YamlValue};
+use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
 use crate::document::tree::YamlTree;
 use crate::ui::tree_view::TreeViewState;
 
@@ -115,12 +115,15 @@ fn parse_scalar_value(input: &str) -> YamlValue {
     }
 
     // Try number
+    if let Ok(num) = trimmed.parse::<i64>() {
+        return YamlValue::Number(YamlNumber::Integer(num));
+    }
     if let Ok(num) = trimmed.parse::<f64>() {
-        return YamlValue::Number(num);
+        return YamlValue::Number(YamlNumber::Float(num));
     }
 
     // Default to string (use original input, not trimmed)
-    YamlValue::String(input.to_string())
+    YamlValue::String(YamlString::Plain(input.to_string()))
 }
 
 /// Test helper to expose private function
@@ -444,7 +447,7 @@ impl EditorState {
         let new_tree = if is_jsonl {
             parse_yamll_content(&yaml_str)?
         } else {
-            parse_yaml(&yaml_str)?
+            YamlTree::new(parse_yaml(&yaml_str)?)
         };
 
         // Reload with the formatted tree
@@ -769,7 +772,7 @@ impl EditorState {
             let index = path[path.len() - 1];
             if let Some(parent) = self.tree.get_node(parent_path) {
                 if let YamlValue::Object(fields) = parent.value() {
-                    Some(fields[index].0.clone())
+                    fields.get_index(index).map(|(k, _)| k.clone())
                 } else {
                     None
                 }
@@ -795,7 +798,7 @@ impl EditorState {
 
             // Sync to system clipboard
             let yaml_value = self.node_to_serde_value(content.nodes[0].value());
-            if let Ok(yaml_str) = serde_yaml::to_string_pretty(&yaml_value) {
+            if let Ok(yaml_str) = serde_yaml::to_string(&yaml_value) {
                 use arboard::Clipboard;
                 if let Ok(mut clipboard) = Clipboard::new() {
                     let _ = clipboard.set_text(yaml_str);
@@ -1872,7 +1875,7 @@ impl EditorState {
                     let index = path[path.len() - 1];
                     if let Some(parent) = self.tree.get_node(parent_path) {
                         if let YamlValue::Object(fields) = parent.value() {
-                            Some(fields[index].0.clone())
+                            fields.get_index(index).map(|(k, _)| k.clone())
                         } else {
                             None
                         }
@@ -1920,7 +1923,7 @@ impl EditorState {
             let clipboard_text = if content.nodes.len() == 1 {
                 // Single node: serialize as-is
                 let yaml_value = self.node_to_serde_value(content.nodes[0].value());
-                serde_yaml::to_string_pretty(&yaml_value).ok()
+                serde_yaml::to_string(&yaml_value).ok()
             } else {
                 // Multiple nodes: serialize as JSON array
                 let array: Vec<serde_yaml::Value> = content
@@ -1928,7 +1931,7 @@ impl EditorState {
                     .iter()
                     .map(|node| self.node_to_serde_value(node.value()))
                     .collect();
-                serde_yaml::to_string_pretty(&array).ok()
+                serde_yaml::to_string(&array).ok()
             };
 
             if let Some(yaml_str) = clipboard_text {
@@ -1946,28 +1949,39 @@ impl EditorState {
     }
 
     fn node_to_serde_value(&self, value: &crate::document::node::YamlValue) -> serde_yaml::Value {
-        use crate::document::node::YamlValue;
+        use crate::document::node::{YamlNumber, YamlValue};
         match value {
             YamlValue::Object(entries) => {
-                let map: serde_yaml::Map<String, serde_yaml::Value> = entries
+                let map: serde_yaml::Mapping = entries
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.node_to_serde_value(v.value())))
+                    .map(|(k, v)| {
+                        (
+                            serde_yaml::Value::String(k.clone()),
+                            self.node_to_serde_value(v.value()),
+                        )
+                    })
                     .collect();
-                serde_yaml::Value::Object(map)
+                serde_yaml::Value::Mapping(map)
             }
             YamlValue::Array(elements) | YamlValue::MultiDoc(elements) => {
                 let arr: Vec<serde_yaml::Value> = elements
                     .iter()
                     .map(|v| self.node_to_serde_value(v.value()))
                     .collect();
-                serde_yaml::Value::Array(arr)
+                serde_yaml::Value::Sequence(arr)
             }
-            YamlValue::String(s) => serde_yaml::Value::String(s.clone()),
-            YamlValue::Number(n) => serde_yaml::Value::Number(
-                serde_yaml::Number::from_f64(*n).unwrap_or_else(|| serde_yaml::Number::from(0)),
-            ),
+            YamlValue::String(s) => serde_yaml::Value::String(s.as_str().to_string()),
+            YamlValue::Number(n) => match n {
+                YamlNumber::Integer(i) => serde_yaml::Value::Number(serde_yaml::Number::from(*i)),
+                YamlNumber::Float(f) => serde_yaml::Value::Number(serde_yaml::Number::from(*f)),
+            },
             YamlValue::Boolean(b) => serde_yaml::Value::Bool(*b),
             YamlValue::Null => serde_yaml::Value::Null,
+            YamlValue::Alias(name) => {
+                // Aliases can't be directly represented in serde_yaml::Value
+                // Use a string representation
+                serde_yaml::Value::String(format!("*{}", name))
+            }
         }
     }
 
@@ -2001,7 +2015,7 @@ impl EditorState {
             use crate::document::node::YamlValue;
             match current.value() {
                 YamlValue::Object(entries) => {
-                    if let Some((key, node)) = entries.get(index) {
+                    if let Some((key, node)) = entries.get_index(index) {
                         match format {
                             "dot" | "jq" => {
                                 result.push('.');
@@ -2752,17 +2766,22 @@ impl EditorState {
                 }
                 crate::document::node::YamlValue::String(s) => {
                     // Pre-populate with current string value (without JSON quotes)
-                    let content = s.clone();
+                    let content = s.as_str().to_string();
                     self.edit_cursor = content.len();
                     self.edit_buffer = Some(content);
                     self.reset_cursor_blink();
                 }
                 crate::document::node::YamlValue::Number(n) => {
                     // Pre-populate with current number value
-                    let num_str = if n.fract() == 0.0 && n.is_finite() {
-                        format!("{:.0}", n)
-                    } else {
-                        n.to_string()
+                    let num_str = match n {
+                        YamlNumber::Integer(i) => i.to_string(),
+                        YamlNumber::Float(f) => {
+                            if f.fract() == 0.0 && f.is_finite() {
+                                format!("{:.0}", f)
+                            } else {
+                                f.to_string()
+                            }
+                        }
                     };
                     self.edit_cursor = num_str.len();
                     self.edit_buffer = Some(num_str);
@@ -2779,6 +2798,13 @@ impl EditorState {
                     // Pre-populate with "null"
                     self.edit_cursor = 4; // "null".len()
                     self.edit_buffer = Some("null".to_string());
+                    self.reset_cursor_blink();
+                }
+                crate::document::node::YamlValue::Alias(name) => {
+                    // Pre-populate with alias reference
+                    let content = format!("*{}", name);
+                    self.edit_cursor = content.len();
+                    self.edit_buffer = Some(content);
                     self.reset_cursor_blink();
                 }
             }
@@ -2816,12 +2842,17 @@ impl EditorState {
         } else {
             // Otherwise, determine the new value based on the original node's type
             match node.value() {
-                YamlValue::String(_) => YamlValue::String(buffer_content),
+                YamlValue::String(_) => YamlValue::String(YamlString::Plain(buffer_content)),
                 YamlValue::Number(_) => {
-                    let num = buffer_content
-                        .parse::<f64>()
-                        .context("Invalid number format")?;
-                    YamlValue::Number(num)
+                    // Try integer first, then float
+                    if let Ok(i) = buffer_content.parse::<i64>() {
+                        YamlValue::Number(YamlNumber::Integer(i))
+                    } else {
+                        let num = buffer_content
+                            .parse::<f64>()
+                            .context("Invalid number format")?;
+                        YamlValue::Number(YamlNumber::Float(num))
+                    }
                 }
                 YamlValue::Boolean(_) => {
                     let bool_val = match buffer_content.as_str() {
@@ -2834,6 +2865,14 @@ impl EditorState {
                 YamlValue::Null => {
                     // This shouldn't happen since we checked for "null" above
                     YamlValue::Null
+                }
+                YamlValue::Alias(_) => {
+                    // Parse alias reference (should start with *)
+                    if let Some(stripped) = buffer_content.strip_prefix('*') {
+                        YamlValue::Alias(stripped.to_string())
+                    } else {
+                        return Err(anyhow!("Alias must start with *"));
+                    }
                 }
                 YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                     return Err(anyhow!("Cannot edit container types"));
@@ -3465,7 +3504,7 @@ impl EditorState {
 
         // Create the container node
         let container_node = if is_object {
-            YamlNode::new(YamlValue::Object(vec![]))
+            YamlNode::new(YamlValue::Object(indexmap::IndexMap::new()))
         } else {
             YamlNode::new(YamlValue::Array(vec![]))
         };
@@ -3688,7 +3727,7 @@ impl EditorState {
         // Check if parent is an object
         if let YamlValue::Object(entries) = parent.value() {
             // Get the current key name
-            if let Some((key, _)) = entries.get(current_index) {
+            if let Some((key, _)) = entries.get_index(current_index) {
                 let key_name = key.clone();
 
                 // Enter rename mode with key name in edit buffer
@@ -3760,9 +3799,10 @@ impl EditorState {
                 return Err(anyhow!("Key '{}' already exists", new_key));
             }
 
-            // Update the key at the current index
-            if let Some((key, _)) = entries.get_mut(current_index) {
-                *key = new_key.clone();
+            // Update the key at the current index by removing and reinserting
+            if let Some((_old_key, value)) = entries.shift_remove_index(current_index) {
+                // Reinsert with new key at the same position
+                entries.shift_insert(current_index, new_key.clone(), value);
 
                 self.mark_dirty();
                 self.rebuild_tree_view();
@@ -4031,7 +4071,7 @@ impl EditorState {
                     let index = path[path.len() - 1];
                     if let Some(parent) = self.tree.get_node(parent_path) {
                         if let YamlValue::Object(fields) = parent.value() {
-                            Some(fields[index].0.clone())
+                            fields.get_index(index).map(|(k, _)| k.clone())
                         } else {
                             None
                         }
@@ -4066,7 +4106,7 @@ impl EditorState {
             // Sync first node to system clipboard
             if !content.nodes.is_empty() {
                 let yaml_value = self.node_to_serde_value(content.nodes[0].value());
-                if let Ok(yaml_str) = serde_yaml::to_string_pretty(&yaml_value) {
+                if let Ok(yaml_str) = serde_yaml::to_string(&yaml_value) {
                     use arboard::Clipboard;
                     if let Ok(mut clipboard) = Clipboard::new() {
                         let _ = clipboard.set_text(yaml_str);
@@ -4207,7 +4247,7 @@ impl EditorState {
                     let index = path[path.len() - 1];
                     if let Some(parent) = self.tree.get_node(parent_path) {
                         if let YamlValue::Object(fields) = parent.value() {
-                            Some(fields[index].0.clone())
+                            fields.get_index(index).map(|(k, _)| k.clone())
                         } else {
                             None
                         }
@@ -4246,7 +4286,7 @@ impl EditorState {
             let clipboard_text = if content.nodes.len() == 1 {
                 // Single node: serialize as-is
                 let yaml_value = self.node_to_serde_value(content.nodes[0].value());
-                serde_yaml::to_string_pretty(&yaml_value).ok()
+                serde_yaml::to_string(&yaml_value).ok()
             } else {
                 // Multiple nodes: serialize as JSON array
                 let array: Vec<serde_yaml::Value> = content
@@ -4254,7 +4294,7 @@ impl EditorState {
                     .iter()
                     .map(|node| self.node_to_serde_value(node.value()))
                     .collect();
-                serde_yaml::to_string_pretty(&array).ok()
+                serde_yaml::to_string(&array).ok()
             };
 
             if let Some(text) = clipboard_text {

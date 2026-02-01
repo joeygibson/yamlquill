@@ -1,6 +1,6 @@
 //! YAMLPath query string parser.
 
-use super::ast::{YamlPath, PathSegment};
+use super::ast::{PathSegment, YamlPath};
 use super::error::YamlPathError;
 
 /// Parser for YAMLPath query strings.

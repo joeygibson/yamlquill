@@ -3,7 +3,7 @@
 //! This module provides functions to load YAML documents from files or stdin,
 //! parsing them into `YamlNode` structures that can be edited by yamlquill.
 
-use crate::document::parser::{parse_yaml_auto, parse_yaml, parse_value};
+use crate::document::parser::{parse_value, parse_yaml, parse_yaml_auto};
 use crate::document::tree::YamlTree;
 use anyhow::{Context, Result};
 use std::fs;
@@ -99,7 +99,8 @@ pub fn load_yaml_file_auto<P: AsRef<Path>>(path: P) -> Result<YamlTree> {
             .with_context(|| format!("Failed to open gzip file: {}", path.display()))?;
         let mut decoder = GzDecoder::new(file);
         let mut contents = String::new();
-        decoder.read_to_string(&mut contents)
+        decoder
+            .read_to_string(&mut contents)
             .context("Failed to decompress gzip file")?;
         contents
     } else {
@@ -201,7 +202,8 @@ pub fn load_yaml_from_stdin() -> Result<YamlTree> {
 /// Each line in the file must be a valid YAML value. Blank lines are skipped.
 /// The result is a YamlTree with a MultiDoc containing all lines.
 pub fn load_jsonl_file<P: AsRef<Path>>(path: P) -> Result<YamlTree> {
-    let content = fs::read_to_string(path.as_ref()).context("Failed to read multi-document YAML file")?;
+    let content =
+        fs::read_to_string(path.as_ref()).context("Failed to read multi-document YAML file")?;
     parse_yamll_content(&content)
 }
 
@@ -212,6 +214,7 @@ pub fn load_jsonl_file<P: AsRef<Path>>(path: P) -> Result<YamlTree> {
 /// - `data.yaml` → true
 /// - `data.yaml.gz` → true
 /// - `data.json.gz` → false
+#[allow(dead_code)]
 fn determine_jsonl_format<P: AsRef<Path>>(path: P) -> bool {
     let path_str = path.as_ref().to_string_lossy();
 
@@ -233,6 +236,7 @@ fn determine_jsonl_format<P: AsRef<Path>>(path: P) -> bool {
 /// - The file cannot be opened
 /// - The file is not valid gzip format (corrupted)
 /// - The decompressed content is not valid UTF-8
+#[allow(dead_code)]
 fn read_gzipped_file<P: AsRef<Path>>(path: P) -> Result<String> {
     use flate2::read::GzDecoder;
     use std::io::Read;

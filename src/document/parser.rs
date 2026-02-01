@@ -19,10 +19,10 @@
 //! let node = parse_yaml(yaml).unwrap();
 //! ```
 
-use serde_yaml::{self, Value};
+use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
+use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use crate::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
-use anyhow::{Result, Context};
+use serde_yaml::{self, Value};
 
 /// Parses a YAML string into a `YamlNode`.
 ///
@@ -65,8 +65,7 @@ use anyhow::{Result, Context};
 /// - The YAML contains syntax errors
 /// - The YAML uses tagged values (not supported in v1)
 pub fn parse_yaml(yaml_str: &str) -> Result<YamlNode> {
-    let value: Value = serde_yaml::from_str(yaml_str)
-        .context("Failed to parse YAML")?;
+    let value: Value = serde_yaml::from_str(yaml_str).context("Failed to parse YAML")?;
 
     convert_value(value)
 }
@@ -125,10 +124,7 @@ fn convert_value(value: Value) -> Result<YamlNode> {
         }
 
         Value::Sequence(seq) => {
-            let elements: Result<Vec<YamlNode>> = seq
-                .into_iter()
-                .map(convert_value)
-                .collect();
+            let elements: Result<Vec<YamlNode>> = seq.into_iter().map(convert_value).collect();
             YamlValue::Array(elements?)
         }
 
@@ -201,16 +197,14 @@ pub fn parse_yaml_auto(yaml_str: &str) -> Result<YamlNode> {
 /// Returns a `YamlNode` with the converted value
 pub fn parse_value(value: &Value) -> YamlNode {
     // Clone and convert - if conversion fails, create a null node
-    convert_value(value.clone()).unwrap_or_else(|_| {
-        YamlNode {
-            value: YamlValue::Null,
-            metadata: crate::document::node::NodeMetadata {
-                text_span: None,
-                modified: false,
-            },
-            anchor: None,
-            original_formatting: None,
-        }
+    convert_value(value.clone()).unwrap_or_else(|_| YamlNode {
+        value: YamlValue::Null,
+        metadata: crate::document::node::NodeMetadata {
+            text_span: None,
+            modified: false,
+        },
+        anchor: None,
+        original_formatting: None,
     })
 }
 

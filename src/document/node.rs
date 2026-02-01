@@ -55,12 +55,6 @@ impl YamlString {
             YamlString::Plain(s) | YamlString::Literal(s) | YamlString::Folded(s) => s,
         }
     }
-
-    pub fn to_string(self) -> String {
-        match self {
-            YamlString::Plain(s) | YamlString::Literal(s) | YamlString::Folded(s) => s,
-        }
-    }
 }
 
 /// Represents YAML numbers (integer or float)
