@@ -1304,6 +1304,53 @@ impl InputHandler {
                         state.set_message("Already at newest jump".to_string(), MessageLevel::Info);
                     }
                 }
+                InputEvent::JumpToAnchor => {
+                    state.clear_pending();
+                    state.clear_search_results();
+                    use crate::editor::state::MessageLevel;
+
+                    // Get the current node and check if it's an alias
+                    let current_path = state.cursor().path().to_vec();
+                    let alias_target = state
+                        .tree()
+                        .get_node(&current_path)
+                        .and_then(|node| node.alias_target())
+                        .map(|s| s.to_string());
+
+                    if let Some(alias_target) = alias_target {
+                        // Look up the anchor definition path
+                        let anchor_path = state
+                            .tree()
+                            .anchor_registry()
+                            .get_anchor_path(&alias_target)
+                            .cloned();
+
+                        if let Some(anchor_path) = anchor_path {
+                            // Add current position to jump list before jumping
+                            state.record_jump();
+
+                            // Navigate to the anchor
+                            state.cursor_mut().set_path(anchor_path);
+                            state.rebuild_tree_view();
+
+                            state.set_message(
+                                format!("Jumped to anchor &{}", alias_target),
+                                MessageLevel::Info,
+                            );
+                        } else {
+                            state.set_message(
+                                format!("Anchor &{} not found", alias_target),
+                                MessageLevel::Error,
+                            );
+                        }
+                    } else {
+                        state.set_message(
+                            "Not on an alias node - press Enter on *alias to jump to &anchor"
+                                .to_string(),
+                            MessageLevel::Info,
+                        );
+                    }
+                }
                 InputEvent::Repeat => {
                     state.clear_pending();
                     state.clear_search_results();

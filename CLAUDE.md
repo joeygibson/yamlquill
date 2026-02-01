@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **YAMLQuill** is a terminal-based structural YAML editor with vim-style keybindings, forked from [JSONQuill](https://github.com/joeygibson/jsonquill). The goal is to achieve full feature parity with JSONQuill while adding support for YAML-specific features including multi-document files, anchors/aliases, and multi-line strings.
 
-**Status:** Phase 4b Complete - Anchor/Alias support implemented
+**Status:** Phase 4 Complete - Full anchor/alias support with navigation
 
 ## Development Workflow
 
@@ -229,16 +229,21 @@ pub enum YamlNumber {
 - ✅ Automatic registry population when creating YamlTree
 - ✅ Display anchors with `&name` badges in tree view
 - ✅ Display aliases as `*name` nodes (already supported by existing code)
-- ✅ All 388 tests passing (including 11 new anchor/alias tests)
+- ✅ All 390 tests passing (including 13 anchor/alias tests)
 
 **Phase 4c: Editing Constraints ✅ COMPLETE**
 - ✅ Read-only alias enforcement (cannot edit alias values directly)
 - ✅ Anchor delete protection (prevents deleting anchors with active aliases)
 - ✅ Registry updates on node deletion to maintain synchronization
 
+**Phase 4d: Anchor Navigation ✅ COMPLETE**
+- ✅ Jump to anchor definition with Enter key on alias nodes
+- ✅ Integrated with jump list (Ctrl-o to jump back)
+- ✅ User-friendly messages for successful navigation and errors
+- ✅ Added 2 navigation tests
+
 **Deferred to v2.0:**
 - ❌ Comment support (requires comment-preserving parser)
-- ❌ Anchor navigation (Enter on alias to jump to anchor definition)
 - ❌ Create/edit anchors and aliases via UI
 
 **Already implemented (Phase 2):**
@@ -280,6 +285,7 @@ pub enum YamlNumber {
 - ✅ Full YAML parsing and tree view
 - ✅ Multi-document YAML files
 - ✅ Anchors and aliases (display with `&name` badges and `*name` nodes)
+- ✅ Anchor navigation (press Enter on `*alias` to jump to `&anchor` definition)
 - ✅ Multi-line strings with style preservation (Literal `|` and Folded `>`)
 - ✅ All 15 themes from JSONQuill
 - ✅ Gzip compression support (.yaml.gz)
@@ -289,8 +295,7 @@ pub enum YamlNumber {
 ### v1.0 Known Limitations
 
 - ❌ No comment support (yaml-rust2 doesn't preserve comments)
-- ❌ Cannot create new anchors/aliases (display and enforce only)
-- ❌ No anchor navigation (cannot jump to anchor definition from alias)
+- ❌ Cannot create new anchors/aliases (display, navigate, and enforce only)
 - ❌ No tag editing (preserved but not editable)
 - ❌ No advanced multi-line features (chomping, indentation indicators)
 
@@ -298,7 +303,6 @@ pub enum YamlNumber {
 
 - Comment support (requires comment-preserving parser)
 - Create/edit anchors and aliases via UI
-- Anchor navigation (jump to definition)
 - YAML tag editing
 - Advanced multi-line string controls
 
@@ -334,7 +338,7 @@ cargo test test_parse_simple_yaml
 - `tests/yaml_display_tests.rs` - Type-aware display
 - `tests/yaml_editing_tests.rs` - Value editing operations
 
-**Current Status:** 388 tests passing (309 unit tests + 79 doctests)
+**Current Status:** 390 tests passing (311 unit tests + 79 doctests)
 
 ### Test Coverage Goals
 

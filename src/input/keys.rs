@@ -103,6 +103,8 @@ pub enum InputEvent {
     JumpBackward,
     /// Jump forward in jump list (Ctrl-i)
     JumpForward,
+    /// Jump to anchor definition (Enter on alias)
+    JumpToAnchor,
     /// Repeat last command (.)
     Repeat,
     /// Insert a character in insert mode
@@ -211,6 +213,7 @@ pub fn map_key_event(event: Event, mode: &EditorMode) -> InputEvent {
             Key::Home => InputEvent::JumpToTop,
             Key::End => InputEvent::JumpToBottom,
             Key::F(1) => InputEvent::Help,
+            Key::Char('\n') => InputEvent::JumpToAnchor, // Enter key for anchor navigation
             _ => InputEvent::Unknown,
         },
         EditorMode::Insert => match key {

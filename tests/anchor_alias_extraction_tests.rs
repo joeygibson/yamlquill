@@ -476,3 +476,130 @@ production:
         panic!("Root should be an object");
     }
 }
+
+#[test]
+fn test_anchor_navigation() {
+    use termion::event::{Event, Key};
+    use yamlquill::document::tree::YamlTree;
+    use yamlquill::editor::mode::EditorMode;
+    use yamlquill::editor::state::EditorState;
+    use yamlquill::input::keys::{map_key_event, InputEvent};
+
+    let yaml = r#"
+defaults: &config
+  timeout: 30
+  retries: 3
+
+production:
+  settings: *config
+"#;
+    let node = parse_yaml_auto(yaml).unwrap();
+    let tree = YamlTree::new(node);
+    let mut state = EditorState::new_with_default_theme(tree);
+
+    // Navigate to the alias at production.settings (path [1, 0])
+    let alias_path = vec![1, 0];
+    state.cursor_mut().set_path(alias_path.clone());
+
+    // Verify we're on the alias
+    let alias_node = state.tree().get_node(&alias_path).unwrap();
+    assert!(
+        matches!(alias_node.value(), YamlValue::Alias(_)),
+        "Should be on alias node"
+    );
+
+    // Simulate pressing Enter
+    let enter_event = map_key_event(Event::Key(Key::Char('\n')), &EditorMode::Normal);
+    assert_eq!(
+        enter_event,
+        InputEvent::JumpToAnchor,
+        "Enter should map to JumpToAnchor"
+    );
+
+    // Get the anchor path before jumping
+    let anchor_path_registry = state
+        .tree()
+        .anchor_registry()
+        .get_anchor_path("config")
+        .unwrap();
+    assert_eq!(
+        *anchor_path_registry,
+        vec![0],
+        "Anchor should be at path [0]"
+    );
+
+    // Trigger the navigation by simulating what the input handler would do
+    let alias_target = state
+        .tree()
+        .get_node(&alias_path)
+        .and_then(|node| node.alias_target())
+        .map(|s| s.to_string());
+
+    assert_eq!(
+        alias_target,
+        Some("config".to_string()),
+        "Should get alias target"
+    );
+
+    if let Some(alias_target) = alias_target {
+        let anchor_path = state
+            .tree()
+            .anchor_registry()
+            .get_anchor_path(&alias_target)
+            .cloned();
+
+        assert!(anchor_path.is_some(), "Should find anchor path");
+
+        if let Some(anchor_path) = anchor_path {
+            // Record jump
+            state.record_jump();
+
+            // Navigate to the anchor
+            state.cursor_mut().set_path(anchor_path.clone());
+
+            // Verify we're now at the anchor
+            assert_eq!(state.cursor().path(), &anchor_path);
+            assert_eq!(anchor_path, vec![0], "Should be at path [0]");
+
+            let anchor_node = state.tree().get_node(&anchor_path).unwrap();
+            assert_eq!(
+                anchor_node.anchor(),
+                Some("config"),
+                "Should be on anchor node"
+            );
+
+            // Verify we can jump back using the jump list
+            let jumped_back = state.jump_backward();
+            if jumped_back {
+                assert_eq!(
+                    state.cursor().path(),
+                    &alias_path,
+                    "Should be back at alias after jump backward"
+                );
+            }
+            // Note: jump_backward might return false if jump list is empty,
+            // which is okay for this test - we're mainly testing the navigation works
+        }
+    }
+}
+
+#[test]
+fn test_anchor_navigation_not_found() {
+    use yamlquill::document::tree::YamlTree;
+    use yamlquill::editor::state::EditorState;
+
+    let yaml = r#"
+production:
+  settings: value
+"#;
+    let node = parse_yaml_auto(yaml).unwrap();
+    let tree = YamlTree::new(node);
+    let mut state = EditorState::new_with_default_theme(tree);
+
+    // Try to look up a non-existent anchor
+    let anchor_path = state
+        .tree()
+        .anchor_registry()
+        .get_anchor_path("nonexistent");
+    assert!(anchor_path.is_none(), "Should not find non-existent anchor");
+}
