@@ -87,6 +87,16 @@ Based on the architecture of [JSONQuill](https://github.com/joeygibson/jsonquill
 
 ## Installation & Usage
 
+### Homebrew (macOS)
+
+```bash
+# Add the tap
+brew tap joeygibson/tools
+
+# Install yamlquill
+brew install yamlquill
+```
+
 ### Build from Source
 
 ```bash
