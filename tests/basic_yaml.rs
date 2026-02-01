@@ -1,5 +1,5 @@
-use yamlquill::document::parser::parse_yaml;
 use yamlquill::document::node::YamlValue;
+use yamlquill::document::parser::parse_yaml;
 
 #[test]
 fn test_parse_simple_yaml() {
