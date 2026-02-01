@@ -2838,6 +2838,49 @@ impl EditorState {
         }
     }
 
+    /// Validate that the edit buffer content is valid for the given value type.
+    /// Returns Ok(()) if valid, Err with message if invalid.
+    fn validate_edit_input(buffer: &str, original_value: &YamlValue) -> anyhow::Result<()> {
+        use anyhow::anyhow;
+
+        // Special case: "null" is always valid (converts any type to Null)
+        if buffer == "null" {
+            return Ok(());
+        }
+
+        match original_value {
+            YamlValue::Number(_) => {
+                // Try parsing as integer or float
+                if buffer.parse::<i64>().is_err() && buffer.parse::<f64>().is_err() {
+                    return Err(anyhow!("Invalid number format: '{}'", buffer));
+                }
+            }
+            YamlValue::Boolean(_) => {
+                // Must be exactly "true" or "false"
+                if !matches!(buffer, "true" | "false") {
+                    return Err(anyhow!(
+                        "Invalid boolean: '{}' (must be 'true' or 'false')",
+                        buffer
+                    ));
+                }
+            }
+            YamlValue::Alias(_) => {
+                // Must start with * and have at least one character after
+                if !buffer.starts_with('*') || buffer.len() < 2 {
+                    return Err(anyhow!("Alias must be in format '*name'"));
+                }
+            }
+            // Strings and Null accept any input
+            YamlValue::String(_) | YamlValue::Null => {}
+            // Containers shouldn't be editable
+            YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
+                return Err(anyhow!("Cannot edit container types"));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Cancels editing and clears the edit buffer without saving changes.
     pub fn cancel_editing(&mut self) {
         self.edit_buffer = None;
@@ -2862,6 +2905,9 @@ impl EditorState {
             .tree
             .get_node(path)
             .ok_or_else(|| anyhow!("Node not found at cursor"))?;
+
+        // Validate input before attempting to parse
+        Self::validate_edit_input(&buffer_content, node.value())?;
 
         // Special case: "null" always converts to Null regardless of original type
         let new_value = if buffer_content == "null" {
@@ -4682,5 +4728,39 @@ mod tests {
 
         let reg_1 = state.registers.get_numbered(1);
         assert_eq!(reg_1.nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_validation_invalid_number() {
+        use crate::document::node::{YamlNode, YamlNumber, YamlValue};
+
+        // Create a number node
+        let node = YamlNode::new(YamlValue::Number(YamlNumber::Integer(42)));
+
+        // Test invalid number input
+        let result = EditorState::validate_edit_input("abc", node.value());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid number"));
+
+        // Test valid number inputs
+        assert!(EditorState::validate_edit_input("123", node.value()).is_ok());
+        assert!(EditorState::validate_edit_input("45.67", node.value()).is_ok());
+    }
+
+    #[test]
+    fn test_validation_invalid_boolean() {
+        use crate::document::node::{YamlNode, YamlValue};
+
+        // Create a boolean node
+        let node = YamlNode::new(YamlValue::Boolean(true));
+
+        // Test invalid boolean input
+        let result = EditorState::validate_edit_input("maybe", node.value());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid boolean"));
+
+        // Test valid boolean inputs
+        assert!(EditorState::validate_edit_input("true", node.value()).is_ok());
+        assert!(EditorState::validate_edit_input("false", node.value()).is_ok());
     }
 }
