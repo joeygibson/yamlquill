@@ -4731,36 +4731,250 @@ mod tests {
     }
 
     #[test]
-    fn test_validation_invalid_number() {
-        use crate::document::node::{YamlNode, YamlNumber, YamlValue};
+    fn test_edit_plain_string() -> anyhow::Result<()> {
+        use crate::document::node::{YamlNode, YamlString, YamlValue};
+        use crate::document::tree::YamlTree;
+        use indexmap::IndexMap;
 
-        // Create a number node
-        let node = YamlNode::new(YamlValue::Number(YamlNumber::Integer(42)));
+        // Create tree with plain string: {"name": "Alice"}
+        let mut map = IndexMap::new();
+        map.insert(
+            "name".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(map)));
+        let mut state = EditorState::new_with_default_theme(tree);
 
-        // Test invalid number input
-        let result = EditorState::validate_edit_input("abc", node.value());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid number"));
+        // Navigate to "name" field (index 0 in object)
+        state.cursor_mut().set_path(vec![0]);
 
-        // Test valid number inputs
-        assert!(EditorState::validate_edit_input("123", node.value()).is_ok());
-        assert!(EditorState::validate_edit_input("45.67", node.value()).is_ok());
+        // Enter edit mode
+        state.edit_buffer = Some("Bob".to_string());
+
+        // Commit edit
+        state.commit_editing()?;
+
+        // Verify: value changed and still Plain
+        let node = state.tree().get_node(&[0]).unwrap();
+        match node.value() {
+            YamlValue::String(YamlString::Plain(s)) if s == "Bob" => (),
+            _ => panic!("Expected Plain string 'Bob', got {:?}", node.value()),
+        }
+
+        assert!(state.is_dirty());
+        Ok(())
     }
 
     #[test]
-    fn test_validation_invalid_boolean() {
+    fn test_edit_literal_string_preserves_style() -> anyhow::Result<()> {
+        use crate::document::node::{YamlNode, YamlString, YamlValue};
+        use crate::document::tree::YamlTree;
+        use indexmap::IndexMap;
+
+        // Create tree with Literal string (multi-line with |): {"description": "Line 1\nLine 2"}
+        let mut map = IndexMap::new();
+        map.insert(
+            "description".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Literal(
+                "Line 1\nLine 2".to_string(),
+            ))),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(map)));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Navigate to "description" field (index 0 in object)
+        state.cursor_mut().set_path(vec![0]);
+
+        // Edit the content
+        state.edit_buffer = Some("Line 1\nLine 2\nLine 3".to_string());
+
+        // Commit edit
+        state.commit_editing()?;
+
+        // CRITICAL: Verify it's STILL Literal, not Plain!
+        let node = state.tree().get_node(&[0]).unwrap();
+        match node.value() {
+            YamlValue::String(YamlString::Literal(s)) if s == "Line 1\nLine 2\nLine 3" => (),
+            YamlValue::String(YamlString::Plain(_)) => {
+                panic!("BUG: Literal string became Plain after editing!")
+            }
+            _ => panic!("Expected Literal string, got {:?}", node.value()),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_folded_string_preserves_style() -> anyhow::Result<()> {
+        use crate::document::node::{YamlNode, YamlString, YamlValue};
+        use crate::document::tree::YamlTree;
+        use indexmap::IndexMap;
+
+        // Create tree with Folded string (multi-line with >): {"text": "This is a long paragraph"}
+        let mut map = IndexMap::new();
+        map.insert(
+            "text".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Folded(
+                "This is a long paragraph".to_string(),
+            ))),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(map)));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Navigate to "text" field (index 0 in object)
+        state.cursor_mut().set_path(vec![0]);
+        state.edit_buffer = Some("This is a modified paragraph".to_string());
+        state.commit_editing()?;
+
+        // Verify it's STILL Folded
+        let node = state.tree().get_node(&[0]).unwrap();
+        match node.value() {
+            YamlValue::String(YamlString::Folded(s)) if s == "This is a modified paragraph" => (),
+            _ => panic!("Expected Folded string, got {:?}", node.value()),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_integer() -> anyhow::Result<()> {
+        use crate::document::node::{YamlNode, YamlNumber, YamlValue};
+        use crate::document::tree::YamlTree;
+        use indexmap::IndexMap;
+
+        // Create tree: {"count": 42}
+        let mut map = IndexMap::new();
+        map.insert(
+            "count".to_string(),
+            YamlNode::new(YamlValue::Number(YamlNumber::Integer(42))),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(map)));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Navigate to "count" field (index 0 in object)
+        state.cursor_mut().set_path(vec![0]);
+        state.edit_buffer = Some("123".to_string());
+        state.commit_editing()?;
+
+        let node = state.tree().get_node(&[0]).unwrap();
+        match node.value() {
+            YamlValue::Number(YamlNumber::Integer(123)) => (),
+            _ => panic!("Expected integer 123, got {:?}", node.value()),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_float() -> anyhow::Result<()> {
+        use crate::document::node::{YamlNode, YamlNumber, YamlValue};
+        use crate::document::tree::YamlTree;
+        use indexmap::IndexMap;
+
+        // Create tree: {"price": 19.99}
+        let mut map = IndexMap::new();
+        map.insert(
+            "price".to_string(),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(19.99))),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(map)));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Navigate to "price" field (index 0 in object)
+        state.cursor_mut().set_path(vec![0]);
+        state.edit_buffer = Some("29.99".to_string());
+        state.commit_editing()?;
+
+        let node = state.tree().get_node(&[0]).unwrap();
+        match node.value() {
+            YamlValue::Number(YamlNumber::Float(f)) if (*f - 29.99).abs() < 0.001 => (),
+            _ => panic!("Expected float 29.99, got {:?}", node.value()),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_boolean() -> anyhow::Result<()> {
         use crate::document::node::{YamlNode, YamlValue};
+        use crate::document::tree::YamlTree;
+        use indexmap::IndexMap;
 
-        // Create a boolean node
-        let node = YamlNode::new(YamlValue::Boolean(true));
+        // Create tree: {"enabled": true}
+        let mut map = IndexMap::new();
+        map.insert(
+            "enabled".to_string(),
+            YamlNode::new(YamlValue::Boolean(true)),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(map)));
+        let mut state = EditorState::new_with_default_theme(tree);
 
-        // Test invalid boolean input
-        let result = EditorState::validate_edit_input("maybe", node.value());
+        // Navigate to "enabled" field (index 0 in object)
+        state.cursor_mut().set_path(vec![0]);
+        state.edit_buffer = Some("false".to_string());
+        state.commit_editing()?;
+
+        let node = state.tree().get_node(&[0]).unwrap();
+        assert_eq!(node.value(), &YamlValue::Boolean(false));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_invalid_number_rejected() {
+        use crate::document::node::{YamlNode, YamlNumber, YamlValue};
+        use crate::document::tree::YamlTree;
+        use indexmap::IndexMap;
+
+        // Create tree: {"count": 42}
+        let mut map = IndexMap::new();
+        map.insert(
+            "count".to_string(),
+            YamlNode::new(YamlValue::Number(YamlNumber::Integer(42))),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(map)));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Navigate to "count" field (index 0 in object)
+        state.cursor_mut().set_path(vec![0]);
+        state.edit_buffer = Some("not_a_number".to_string());
+
+        // Should fail validation
+        let result = state.commit_editing();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid number"));
+
+        // Verify original value unchanged
+        let node = state.tree().get_node(&[0]).unwrap();
+        assert_eq!(node.value(), &YamlValue::Number(YamlNumber::Integer(42)));
+    }
+
+    #[test]
+    fn test_edit_invalid_boolean_rejected() {
+        use crate::document::node::{YamlNode, YamlValue};
+        use crate::document::tree::YamlTree;
+        use indexmap::IndexMap;
+
+        // Create tree: {"enabled": true}
+        let mut map = IndexMap::new();
+        map.insert(
+            "enabled".to_string(),
+            YamlNode::new(YamlValue::Boolean(true)),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(map)));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Navigate to "enabled" field (index 0 in object)
+        state.cursor_mut().set_path(vec![0]);
+        state.edit_buffer = Some("maybe".to_string());
+
+        // Should fail validation
+        let result = state.commit_editing();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid boolean"));
 
-        // Test valid boolean inputs
-        assert!(EditorState::validate_edit_input("true", node.value()).is_ok());
-        assert!(EditorState::validate_edit_input("false", node.value()).is_ok());
+        // Verify original value unchanged
+        let node = state.tree().get_node(&[0]).unwrap();
+        assert_eq!(node.value(), &YamlValue::Boolean(true));
     }
 }
