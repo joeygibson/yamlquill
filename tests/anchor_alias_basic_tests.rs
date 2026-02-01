@@ -1,6 +1,7 @@
 //! Basic tests for anchor/alias data model
 
 use yamlquill::document::node::{YamlNode, YamlValue};
+use yamlquill::document::tree::AnchorRegistry;
 
 #[test]
 fn test_yaml_node_has_alias_target_field() {
@@ -12,4 +13,44 @@ fn test_yaml_node_has_alias_target_field() {
     // Should be settable
     node.set_alias_target(Some("test_anchor".to_string()));
     assert_eq!(node.alias_target(), Some("test_anchor"));
+}
+
+#[test]
+fn test_anchor_registry_register_and_lookup() {
+    let mut registry = AnchorRegistry::new();
+
+    // Register an anchor
+    registry.register_anchor("default".to_string(), vec![0, 1]);
+
+    // Should be able to look it up
+    assert_eq!(registry.get_anchor_path("default"), Some(&vec![0, 1]));
+    assert_eq!(registry.get_anchor_path("nonexistent"), None);
+}
+
+#[test]
+fn test_anchor_registry_aliases() {
+    let mut registry = AnchorRegistry::new();
+
+    registry.register_anchor("config".to_string(), vec![0]);
+    registry.register_alias(vec![1, 0], "config".to_string());
+    registry.register_alias(vec![2, 0], "config".to_string());
+
+    let aliases = registry.get_aliases_for("config");
+    assert_eq!(aliases.len(), 2);
+    assert!(aliases.contains(&&vec![1, 0]));
+    assert!(aliases.contains(&&vec![2, 0]));
+}
+
+#[test]
+fn test_anchor_registry_can_delete() {
+    let mut registry = AnchorRegistry::new();
+
+    registry.register_anchor("test".to_string(), vec![0]);
+
+    // Can delete when no aliases
+    assert!(registry.can_delete_anchor("test"));
+
+    // Cannot delete when aliases exist
+    registry.register_alias(vec![1], "test".to_string());
+    assert!(!registry.can_delete_anchor("test"));
 }
