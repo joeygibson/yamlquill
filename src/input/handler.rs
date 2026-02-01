@@ -1333,6 +1333,9 @@ impl InputHandler {
                             state.cursor_mut().set_path(anchor_path);
                             state.rebuild_tree_view();
 
+                            // Record the destination position so jump back works
+                            state.record_jump();
+
                             state.set_message(
                                 format!("Jumped to anchor &{}", alias_target),
                                 MessageLevel::Info,
