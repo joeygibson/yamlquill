@@ -1,0 +1,239 @@
+# =============================================================
+# Complex YAML Example: Multi-Service Application Configuration
+# =============================================================
+
+application:
+  name: "fleet-manager"
+  version: "2.4.1"
+  environment: production
+  debug: false
+  log_level: warn
+
+# --- Anchors & Aliases (DRY defaults) ------------------------
+defaults:
+  resource_limits: &default_limits
+    cpu: "500m"
+    memory: "512Mi"
+  health_check: &default_health
+    enabled: true
+    interval_seconds: 30
+    timeout_seconds: 5
+    failure_threshold: 3
+
+# --- Nested Multiline Strings ---------------------------------
+metadata:
+  description: |
+    Fleet Manager orchestrates distributed microservices
+    across multiple cloud regions. It handles routing,
+    health monitoring, and auto-scaling decisions.
+  changelog: >
+    v2.4.1 fixes a race condition in the leader-election module
+    and improves P95 latency by ~18% under heavy fan-out.
+
+# --- Complex Nested Structures --------------------------------
+services:
+  - name: api-gateway
+    replicas: 3
+    ports:
+      - { container: 8080, host: 80,   protocol: TCP }
+      - { container: 8443, host: 443,  protocol: TCP }
+    resources:
+      requests: *default_limits          # alias reuse
+      limits:
+        cpu: "1500m"
+        memory: "1Gi"
+    health: *default_health              # alias reuse
+    env:
+      - name: RATE_LIMIT_RPS
+        value: "2000"
+      - name: JWT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: gateway-secrets
+            key: jwt_secret
+    routes:
+      - path: "/api/v1/fleet/*"
+        backend: fleet-controller
+        auth_required: true
+        rate_limit: 500
+      - path: "/api/v1/health"
+        backend: fleet-controller
+        auth_required: false
+        rate_limit: null          # unlimited
+
+  - name: fleet-controller
+    replicas: 5
+    ports:
+      - { container: 9090, host: null, protocol: TCP }
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
+    health: *default_health
+    env:
+      - name: CACHE_TTL_SECONDS
+        value: "300"
+      - name: DB_URL
+        valueFrom:
+          secretKeyRef:
+            name: db-secrets
+            key: connection_string
+    scaling:
+      strategy: horizontal
+      min_replicas: 2
+      max_replicas: 10
+      triggers:
+        - type: cpu
+          threshold_percent: 70
+        - type: custom_metric
+          metric_name: pending_jobs
+          threshold: 500
+          query: 'sum(pending_jobs{service="fleet-controller"})'
+
+  - name: event-processor
+    replicas: 2
+    ports:
+      - { container: 5672, host: null, protocol: TCP }
+    resources:
+      requests: *default_limits
+      limits: *default_limits
+    health:
+      <<: *default_health              # merge key: override one field
+      interval_seconds: 60
+    subscriptions:
+      - topic: "fleet.events.create"
+        consumer_group: "processor-cg"
+        batch_size: 100
+        dead_letter:
+          enabled: true
+          max_retries: 3
+          backoff_ms: [1000, 2000, 5000]
+      - topic: "fleet.events.telemetry"
+        consumer_group: "processor-cg"
+        batch_size: 500
+        dead_letter:
+          enabled: false
+
+# --- Conditional / Tagged Values -----------------------------
+databases:
+  primary:
+    driver: postgresql
+    host: "db-primary.internal"
+    port: 5432
+    name: fleet_db
+    pool:
+      min_connections: 10
+      max_connections: 50
+      idle_timeout_seconds: 300
+    migrations:
+      enabled: true
+      auto_run: false
+      directory: "./migrations"
+  read_replicas:
+    - host: "db-replica-us-east.internal"
+      port: 5432
+      weight: 60
+    - host: "db-replica-eu-west.internal"
+      port: 5432
+      weight: 40
+
+  cache:
+    driver: redis
+    cluster_mode: true
+    nodes:
+      - "redis-node-0.internal:6379"
+      - "redis-node-1.internal:6379"
+      - "redis-node-2.internal:6379"
+    keyspace_notifications: "KEA"
+    eviction_policy: allkeys-lru
+
+# --- Deeply Nested Map with Mixed Types -----------------------
+observability:
+  tracing:
+    enabled: true
+    provider: jaeger
+    sample_rate: 0.15
+    exporters:
+      - type: jaeger
+        endpoint: "http://jaeger-collector.monitoring:14268/api/traces"
+      - type: otlp
+        endpoint: "http://otel-collector.monitoring:4317"
+        headers:
+          Authorization: "Bearer ${OTEL_API_KEY}"
+  metrics:
+    provider: prometheus
+    scrape_interval: "15s"
+    custom_metrics:
+      - name: fleet_dispatch_latency
+        type: histogram
+        buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+        labels: [region, vehicle_class]
+      - name: fleet_active_vehicles
+        type: gauge
+        labels: [region]
+  alerts:
+    - name: "high-error-rate"
+      condition: 'rate(errors_total[5m]) > 0.05'
+      severity: critical
+      notify:
+        - channel: "#incidents"
+          platform: slack
+        - channel: "oncall@fleet.internal"
+          platform: email
+      cooldown_minutes: 15
+    - name: "replica-unhealthy"
+      condition: 'unhealthy_replicas > 0'
+      severity: warning
+      notify:
+        - channel: "#fleet-alerts"
+          platform: slack
+
+# --- Null, Boolean, and Numeric Edge Cases -------------------
+feature_flags:
+  new_routing_engine:    true
+  legacy_fallback:       false
+  experiment_cohort:     null
+  traffic_split_percent: 0.0
+  max_iterations:        9_999_999
+  timeout_ns:            1.5e9
+
+# --- Ordered List of Pipeline Steps (mixed types) ------------
+ci_pipeline:
+  - step: checkout
+    uses: "actions/checkout@v4"
+    with:
+      fetch_depth: 0
+
+  - step: test
+    uses: "actions/setup-go@v5"
+    matrix:
+      go_version: ["1.21", "1.22", "1.23"]
+    run: |
+      go mod download
+      go test -race -coverprofile=coverage.out ./...
+
+  - step: build
+    run: >
+      docker buildx build
+      --platform linux/amd64,linux/arm64
+      --tag fleet-manager:${TAG}
+      .
+
+  - step: deploy
+    condition: "branch == 'main'"
+    target_regions: ["us-east-1", "eu-west-1", "ap-south-1"]
+    strategy: canary
+    canary:
+      phases:
+        - percent: 5
+          duration_minutes: 10
+        - percent: 25
+          duration_minutes: 30
+        - percent: 100
+          duration_minutes: 0
+      automated_rollback:
+        enabled: true
+        error_threshold_percent: 2.0
