@@ -54,3 +54,19 @@ fn test_anchor_registry_can_delete() {
     registry.register_alias(vec![1], "test".to_string());
     assert!(!registry.can_delete_anchor("test"));
 }
+
+#[test]
+fn test_anchor_registry_remove_node() {
+    let mut registry = AnchorRegistry::new();
+
+    registry.register_anchor("test".to_string(), vec![0]);
+    registry.register_alias(vec![1], "test".to_string());
+
+    // Remove anchor node
+    registry.remove_node(&[0]);
+    assert!(registry.get_anchor_path("test").is_none());
+
+    // Remove alias node
+    registry.remove_node(&[1]);
+    assert_eq!(registry.get_aliases_for("test").len(), 0);
+}
