@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **YAMLQuill** is a terminal-based structural YAML editor with vim-style keybindings, forked from [JSONQuill](https://github.com/joeygibson/jsonquill). The goal is to achieve full feature parity with JSONQuill while adding support for YAML-specific features including multi-document files, anchors/aliases, and multi-line strings.
 
-**Status:** Phase 2c Complete - Value editing bugs fixed and tested
+**Status:** Phase 2d Complete - Editor state integration validated with comprehensive tests
 
 ## Development Workflow
 
@@ -159,9 +159,14 @@ pub enum YamlNumber {
   - Added input validation to prevent data corruption
   - Added 8 comprehensive editing tests
   - All 315 tests passing
+- ✅ Phase 2d: Editor State Integration (checkpoint: phase2d-complete)
+  - Added 19 integration tests for undo/redo, registers, visual mode
+  - Validated undo/redo after editing all scalar types
+  - Validated YamlString style preservation (Plain/Literal/Folded)
+  - Validated register type preservation (Integer vs Float, etc.)
+  - All 334 tests passing
 
 **Next:**
-- Phase 2d: Editor State Integration (registers, undo/redo)
 - Phase 2e: YAML-Aware Display (type indicators, color coding)
 - Phase 2f: Navigation Enhancements (jump commands, fold improvements)
 
