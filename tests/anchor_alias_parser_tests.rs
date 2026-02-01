@@ -28,3 +28,20 @@ fn test_parse_integer() {
         panic!("Expected object");
     }
 }
+
+#[test]
+#[ignore = "Anchor name extraction requires additional YAML scanning"]
+fn test_parse_yaml_with_anchor() {
+    let yaml = r#"
+defaults: &config
+  timeout: 30
+"#;
+    let node = parse_yaml_auto(yaml).unwrap();
+
+    if let YamlValue::Object(obj) = node.value() {
+        let defaults_node = obj.get("defaults").unwrap();
+        assert_eq!(defaults_node.anchor(), Some("config"));
+    } else {
+        panic!("Expected object");
+    }
+}

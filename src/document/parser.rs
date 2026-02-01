@@ -190,6 +190,10 @@ fn convert_value(value: Value) -> Result<YamlNode> {
 /// - `Yaml::Alias` → Error (not yet implemented, Task 6)
 /// - `Yaml::BadValue` → Error
 fn convert_yaml_rust2(yaml: &Yaml) -> Result<YamlNode> {
+    // TODO: Implement anchor name extraction from original YAML text
+    // yaml-rust2 resolves anchors internally, so we need to scan the
+    // original text to find anchor definitions (&name) and alias references (*name)
+
     let value = match yaml {
         Yaml::Real(s) => {
             // yaml-rust2 stores real numbers as strings, try to parse as float
