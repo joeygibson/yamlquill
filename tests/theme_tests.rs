@@ -1,5 +1,5 @@
-use yamlquill::theme::{colors::ThemeColors, get_builtin_theme};
 use ratatui::style::Color;
+use yamlquill::theme::{colors::ThemeColors, get_builtin_theme};
 
 // Tests for get_builtin_theme function
 

@@ -1,6 +1,6 @@
+use termion::event::{Event, Key};
 use yamlquill::editor::mode::EditorMode;
 use yamlquill::input::keys::{map_key_event, InputEvent};
-use termion::event::{Event, Key};
 
 #[test]
 fn test_visual_mode_key() {

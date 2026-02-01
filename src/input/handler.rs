@@ -1748,7 +1748,7 @@ impl Default for InputHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{YamlNode, YamlValue};
+    use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
     use crate::document::tree::YamlTree;
     use crate::editor::mode::EditorMode;
     use termion::event::Key;
@@ -1891,7 +1891,9 @@ mod tests {
         use tempfile::TempDir;
 
         let mut handler = InputHandler::new();
-        let tree = YamlTree::new(YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))));
+        let tree = YamlTree::new(YamlNode::new(YamlValue::String(YamlString::Plain(
+            "test".to_string(),
+        ))));
         let mut state = EditorState::new_with_default_theme(tree);
 
         // Create a temporary directory

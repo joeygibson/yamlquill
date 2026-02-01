@@ -128,7 +128,7 @@ impl Default for RegisterSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
+    use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
 
     #[test]
     fn test_register_content_new() {

@@ -827,7 +827,7 @@ fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{YamlString, YamlNumber};
+    use crate::document::node::{YamlNumber, YamlString};
 
     #[test]
     fn test_value_type_from_json() {
@@ -871,7 +871,10 @@ mod tests {
                     "name".to_string(),
                     YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
                 ),
-                ("age".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(30)))),
+                (
+                    "age".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(30))),
+                ),
             ]
             .into_iter()
             .collect(),
@@ -1004,7 +1007,10 @@ mod tests {
                     "name".to_string(),
                     YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
                 ),
-                ("age".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(30)))),
+                (
+                    "age".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(30))),
+                ),
             ]
             .into_iter()
             .collect(),
@@ -1186,7 +1192,10 @@ mod tests {
 
         let obj = YamlNode::new(YamlValue::Object(
             vec![
-                ("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+                (
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+                ),
                 (
                     "name".to_string(),
                     YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
@@ -1206,13 +1215,18 @@ mod tests {
 
         let obj = YamlNode::new(YamlValue::Object(
             vec![
-                ("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+                (
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+                ),
                 (
                     "user".to_string(),
                     YamlNode::new(YamlValue::Object(
                         vec![(
                             "name".to_string(),
-                            YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+                            YamlNode::new(YamlValue::String(YamlString::Plain(
+                                "Alice".to_string(),
+                            ))),
                         )]
                         .into_iter()
                         .collect(),
@@ -1247,14 +1261,19 @@ mod tests {
 
         let obj = YamlNode::new(YamlValue::Object(
             vec![
-                ("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+                (
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+                ),
                 (
                     "name".to_string(),
                     YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
                 ),
                 (
                     "email".to_string(),
-                    YamlNode::new(YamlValue::String(YamlString::Plain("alice@example.com".to_string()))),
+                    YamlNode::new(YamlValue::String(YamlString::Plain(
+                        "alice@example.com".to_string(),
+                    ))),
                 ),
                 (
                     "active".to_string(),
@@ -1279,7 +1298,9 @@ mod tests {
             vec![
                 (
                     "emoji".to_string(),
-                    YamlNode::new(YamlValue::String(YamlString::Plain("🌟✨🎉🎊🎈".to_string()))),
+                    YamlNode::new(YamlValue::String(YamlString::Plain(
+                        "🌟✨🎉🎊🎈".to_string(),
+                    ))),
                 ),
                 (
                     "chinese".to_string(),
@@ -1298,7 +1319,9 @@ mod tests {
 
         // Test array with UTF-8 strings
         let arr = YamlNode::new(YamlValue::Array(vec![
-            YamlNode::new(YamlValue::String(YamlString::Plain("🌟✨🎉🎊🎈🎁🎀🎂".to_string()))),
+            YamlNode::new(YamlValue::String(YamlString::Plain(
+                "🌟✨🎉🎊🎈🎁🎀🎂".to_string(),
+            ))),
             YamlNode::new(YamlValue::String(YamlString::Plain(
                 "你好世界这是一个很长的字符串".to_string(),
             ))),
@@ -1352,7 +1375,10 @@ mod tests {
 
         let lines = vec![YamlNode::new(YamlValue::Object(
             vec![
-                ("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1)))),
+                (
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))),
+                ),
                 (
                     "name".to_string(),
                     YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),

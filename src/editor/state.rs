@@ -4472,9 +4472,17 @@ mod tests {
     fn test_get_current_path_dot_notation() {
         // Create tree: {"users": [{"name": "Alice"}]}
         let mut inner_obj = IndexMap::new();
-        inner_obj.insert("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))));
+        inner_obj.insert(
+            "name".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+        );
         let mut outer_obj = IndexMap::new();
-        outer_obj.insert("users".to_string(), YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(inner_obj))])));
+        outer_obj.insert(
+            "users".to_string(),
+            YamlNode::new(YamlValue::Array(vec![YamlNode::new(YamlValue::Object(
+                inner_obj,
+            ))])),
+        );
         let tree = YamlTree::new(YamlNode::new(YamlValue::Object(outer_obj)));
 
         let mut state = EditorState::new_with_default_theme(tree);
@@ -4499,9 +4507,15 @@ mod tests {
     fn test_get_current_path_jsonl() {
         // Create JSONL tree with lines: [{"id": 1}, {"id": 2}]
         let mut obj1 = IndexMap::new();
-        obj1.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))));
+        obj1.insert(
+            "id".to_string(),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))),
+        );
         let mut obj2 = IndexMap::new();
-        obj2.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))));
+        obj2.insert(
+            "id".to_string(),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))),
+        );
         let tree = YamlTree::new(YamlNode::new(YamlValue::MultiDoc(vec![
             YamlNode::new(YamlValue::Object(obj1)),
             YamlNode::new(YamlValue::Object(obj2)),
@@ -4545,7 +4559,10 @@ mod tests {
     #[test]
     fn test_yank_to_named_register() {
         let mut obj = IndexMap::new();
-        obj.insert("key".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string()))));
+        obj.insert(
+            "key".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string()))),
+        );
         let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
 
         let mut state = EditorState::new_with_default_theme(tree);

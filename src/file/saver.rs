@@ -717,6 +717,8 @@ fn escape_yaml_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::node::{YamlNumber, YamlString};
+    use indexmap::IndexMap;
 
     #[test]
     fn test_serialize_null() {
@@ -771,7 +773,10 @@ mod tests {
     #[test]
     fn test_serialize_simple_object() {
         let mut obj = IndexMap::new();
-        obj.insert("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))));
+        obj.insert(
+            "name".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+        );
         let node = YamlNode::new(YamlValue::Object(obj));
         let result = serialize_node(&node, 2, 0);
         // Small scalar objects use compact formatting
@@ -794,7 +799,10 @@ mod tests {
     #[test]
     fn test_serialize_nested_object() {
         let mut inner = IndexMap::new();
-        inner.insert("age".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(30.0))));
+        inner.insert(
+            "age".to_string(),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(30.0))),
+        );
         let mut outer = IndexMap::new();
         outer.insert("user".to_string(), YamlNode::new(YamlValue::Object(inner)));
         let node = YamlNode::new(YamlValue::Object(outer));
@@ -829,8 +837,14 @@ mod tests {
     #[test]
     fn test_compact_object_with_scalars() {
         let mut obj = IndexMap::new();
-        obj.insert("a".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))));
-        obj.insert("b".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))));
+        obj.insert(
+            "a".to_string(),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))),
+        );
+        obj.insert(
+            "b".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("test".to_string()))),
+        );
         obj.insert("c".to_string(), YamlNode::new(YamlValue::Boolean(false)));
         let node = YamlNode::new(YamlValue::Object(obj));
         let result = serialize_node(&node, 2, 0);
@@ -841,7 +855,10 @@ mod tests {
     fn test_nested_containers_use_multiline() {
         // Array containing an object should use multi-line formatting
         let mut inner = IndexMap::new();
-        inner.insert("key".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string()))));
+        inner.insert(
+            "key".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string()))),
+        );
         let arr = vec![YamlNode::new(YamlValue::Object(inner))];
         let node = YamlNode::new(YamlValue::Array(arr));
         let result = serialize_node(&node, 2, 0);
@@ -912,7 +929,8 @@ mod tests {
 
         // Modify a value
         if let YamlValue::Object(ref mut entries) = tree.root_mut().value_mut() {
-            *entries.get_index_mut(0).unwrap().1.value_mut() = YamlValue::String(YamlString::Plain("Bob".to_string()));
+            *entries.get_index_mut(0).unwrap().1.value_mut() =
+                YamlValue::String(YamlString::Plain("Bob".to_string()));
         }
 
         let config = Config::default();
@@ -990,7 +1008,9 @@ mod tests {
 
         // Navigate to company object and modify it
         if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
-            if let YamlValue::Object(ref mut company_entries) = root_entries.get_index_mut(0).unwrap().1.value_mut() {
+            if let YamlValue::Object(ref mut company_entries) =
+                root_entries.get_index_mut(0).unwrap().1.value_mut()
+            {
                 // Rename "name" to "companyName" by removing old and inserting new
                 if let Some((_, value)) = company_entries.shift_remove_entry("name") {
                     company_entries.insert("companyName".to_string(), value);
@@ -999,7 +1019,9 @@ mod tests {
                 // Add a new field "employees": 23
                 company_entries.insert(
                     "employees".to_string(),
-                    crate::document::node::YamlNode::new(YamlValue::Number(YamlNumber::Float(23.0))),
+                    crate::document::node::YamlNode::new(YamlValue::Number(YamlNumber::Float(
+                        23.0,
+                    ))),
                 );
             }
         }
@@ -1109,17 +1131,26 @@ mod tests {
         let lines = vec![
             {
                 let mut obj = IndexMap::new();
-                obj.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))));
+                obj.insert(
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))),
+                );
                 YamlNode::new(YamlValue::Object(obj))
             },
             {
                 let mut obj = IndexMap::new();
-                obj.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))));
+                obj.insert(
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))),
+                );
                 YamlNode::new(YamlValue::Object(obj))
             },
             {
                 let mut obj = IndexMap::new();
-                obj.insert("id".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Float(3.0))));
+                obj.insert(
+                    "id".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Float(3.0))),
+                );
                 YamlNode::new(YamlValue::Object(obj))
             },
         ];

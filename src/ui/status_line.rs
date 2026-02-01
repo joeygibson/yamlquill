@@ -156,7 +156,7 @@ pub fn render_status_line(f: &mut Frame, area: Rect, state: &EditorState, colors
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::node::{YamlNode, YamlValue, YamlString};
+    use crate::document::node::{YamlNode, YamlString, YamlValue};
     use crate::document::tree::YamlTree;
     use crate::editor::state::EditorState;
     use crate::theme;
