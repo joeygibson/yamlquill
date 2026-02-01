@@ -8,23 +8,26 @@
 //! # Example
 //!
 //! ```
-//! use yamlquill::document::node::{YamlNode, YamlValue};
+//! use yamlquill::document::node::{YamlNode, YamlValue, YamlString, YamlNumber};
+//! use indexmap::IndexMap;
 //!
 //! // Create a simple string node
-//! let mut node = YamlNode::new(YamlValue::String("hello".to_string()));
+//! let mut node = YamlNode::new(YamlValue::String(YamlString::Plain("hello".to_string())));
 //! assert!(node.is_modified()); // New nodes are marked as modified
 //!
 //! // Create a complex nested structure
-//! let object = YamlNode::new(YamlValue::Object(vec![
-//!     ("name".to_string(), YamlNode::new(YamlValue::String("yamlquill".to_string()))),
-//!     ("version".to_string(), YamlNode::new(YamlValue::Number(1.0))),
-//! ]));
+//! let mut map = IndexMap::new();
+//! map.insert("name".to_string(), YamlNode::new(YamlValue::String(YamlString::Plain("yamlquill".to_string()))));
+//! map.insert("version".to_string(), YamlNode::new(YamlValue::Number(YamlNumber::Integer(1))));
+//! let object = YamlNode::new(YamlValue::Object(map));
 //!
 //! // Modify a value
 //! if let YamlValue::Object(ref mut fields) = node.value_mut() {
-//!     fields.push(("key".to_string(), YamlNode::new(YamlValue::Null)));
+//!     fields.insert("key".to_string(), YamlNode::new(YamlValue::Null));
 //! }
 //! ```
+
+use indexmap::IndexMap;
 
 /// A byte range in the original YAML source.
 ///
@@ -38,6 +41,44 @@ pub struct TextSpan {
     pub end: usize,
 }
 
+/// Represents different YAML string styles
+#[derive(Debug, Clone, PartialEq)]
+pub enum YamlString {
+    Plain(String),
+    Literal(String),
+    Folded(String),
+}
+
+impl YamlString {
+    pub fn as_str(&self) -> &str {
+        match self {
+            YamlString::Plain(s) | YamlString::Literal(s) | YamlString::Folded(s) => s,
+        }
+    }
+
+    pub fn to_string(self) -> String {
+        match self {
+            YamlString::Plain(s) | YamlString::Literal(s) | YamlString::Folded(s) => s,
+        }
+    }
+}
+
+/// Represents YAML numbers (integer or float)
+#[derive(Debug, Clone, PartialEq)]
+pub enum YamlNumber {
+    Integer(i64),
+    Float(f64),
+}
+
+impl YamlNumber {
+    pub fn as_f64(&self) -> f64 {
+        match self {
+            YamlNumber::Integer(i) => *i as f64,
+            YamlNumber::Float(f) => *f,
+        }
+    }
+}
+
 /// A YAML value without metadata.
 ///
 /// This enum represents the core YAML types: objects, arrays, strings, numbers,
@@ -46,17 +87,19 @@ pub struct TextSpan {
 #[derive(Debug, Clone, PartialEq)]
 pub enum YamlValue {
     /// A YAML object containing key-value pairs
-    Object(Vec<(String, YamlNode)>),
+    Object(IndexMap<String, YamlNode>),
     /// A YAML array containing ordered values
     Array(Vec<YamlNode>),
-    /// A YAML string
-    String(String),
-    /// A YAML number (represented as f64)
-    Number(f64),
+    /// A YAML string with style information
+    String(YamlString),
+    /// A YAML number (integer or float)
+    Number(YamlNumber),
     /// A YAML boolean
     Boolean(bool),
     /// A YAML null value
     Null,
+    /// A YAML alias reference
+    Alias(String),
     /// A multi-document YAML file (each document is a YamlNode)
     MultiDoc(Vec<YamlNode>),
 }
@@ -70,6 +113,8 @@ pub enum YamlValue {
 pub struct YamlNode {
     pub(crate) value: YamlValue,
     pub(crate) metadata: NodeMetadata,
+    pub(crate) anchor: Option<String>,
+    pub(crate) original_formatting: Option<String>,
 }
 
 /// Metadata associated with a YAML node.
@@ -91,12 +136,13 @@ impl YamlValue {
     /// # Example
     ///
     /// ```
-    /// use yamlquill::document::node::YamlValue;
+    /// use yamlquill::document::node::{YamlValue, YamlNumber};
+    /// use indexmap::IndexMap;
     ///
-    /// let obj = YamlValue::Object(vec![]);
+    /// let obj = YamlValue::Object(IndexMap::new());
     /// assert!(obj.is_object());
     ///
-    /// let num = YamlValue::Number(42.0);
+    /// let num = YamlValue::Number(YamlNumber::Integer(42));
     /// assert!(!num.is_object());
     /// ```
     pub fn is_object(&self) -> bool {
@@ -108,12 +154,12 @@ impl YamlValue {
     /// # Example
     ///
     /// ```
-    /// use yamlquill::document::node::YamlValue;
+    /// use yamlquill::document::node::{YamlValue, YamlNumber};
     ///
     /// let arr = YamlValue::Array(vec![]);
     /// assert!(arr.is_array());
     ///
-    /// let num = YamlValue::Number(42.0);
+    /// let num = YamlValue::Number(YamlNumber::Integer(42));
     /// assert!(!num.is_array());
     /// ```
     pub fn is_array(&self) -> bool {
@@ -125,15 +171,16 @@ impl YamlValue {
     /// # Example
     ///
     /// ```
-    /// use yamlquill::document::node::YamlValue;
+    /// use yamlquill::document::node::{YamlValue, YamlNumber};
+    /// use indexmap::IndexMap;
     ///
-    /// let obj = YamlValue::Object(vec![]);
+    /// let obj = YamlValue::Object(IndexMap::new());
     /// assert!(obj.is_container());
     ///
     /// let arr = YamlValue::Array(vec![]);
     /// assert!(arr.is_container());
     ///
-    /// let num = YamlValue::Number(42.0);
+    /// let num = YamlValue::Number(YamlNumber::Integer(42));
     /// assert!(!num.is_container());
     /// ```
     pub fn is_container(&self) -> bool {
@@ -153,9 +200,9 @@ impl YamlNode {
     /// # Example
     ///
     /// ```
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlNumber};
     ///
-    /// let node = YamlNode::new(YamlValue::Number(42.0));
+    /// let node = YamlNode::new(YamlValue::Number(YamlNumber::Integer(42)));
     /// assert!(node.is_modified());
     /// ```
     pub fn new(value: YamlValue) -> Self {
@@ -165,7 +212,25 @@ impl YamlNode {
                 text_span: None,
                 modified: true,
             },
+            anchor: None,
+            original_formatting: None,
         }
+    }
+
+    /// Returns the anchor name if this node has one.
+    pub fn anchor(&self) -> Option<&str> {
+        self.anchor.as_deref()
+    }
+
+    /// Sets the anchor name for this node.
+    pub fn set_anchor(&mut self, anchor: Option<String>) {
+        self.anchor = anchor;
+        self.metadata.modified = true;
+    }
+
+    /// Returns the original formatting if preserved.
+    pub fn original_formatting(&self) -> Option<&str> {
+        self.original_formatting.as_deref()
     }
 
     /// Returns an immutable reference to the node's value.
@@ -190,10 +255,10 @@ impl YamlNode {
     /// # Example
     ///
     /// ```
-    /// use yamlquill::document::node::{YamlNode, YamlValue};
+    /// use yamlquill::document::node::{YamlNode, YamlValue, YamlString};
     ///
-    /// let mut node = YamlNode::new(YamlValue::String("old".to_string()));
-    /// *node.value_mut() = YamlValue::String("new".to_string());
+    /// let mut node = YamlNode::new(YamlValue::String(YamlString::Plain("old".to_string())));
+    /// *node.value_mut() = YamlValue::String(YamlString::Plain("new".to_string()));
     /// assert!(node.is_modified());
     /// ```
     pub fn value_mut(&mut self) -> &mut YamlValue {
