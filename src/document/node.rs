@@ -142,6 +142,7 @@ pub struct YamlNode {
     pub(crate) value: YamlValue,
     pub(crate) metadata: NodeMetadata,
     pub(crate) anchor: Option<String>,
+    pub(crate) alias_target: Option<String>,
     pub(crate) original_formatting: Option<String>,
 }
 
@@ -338,6 +339,7 @@ impl YamlNode {
                 modified: true,
             },
             anchor: None,
+            alias_target: None,
             original_formatting: None,
         }
     }
@@ -350,6 +352,17 @@ impl YamlNode {
     /// Sets the anchor name for this node.
     pub fn set_anchor(&mut self, anchor: Option<String>) {
         self.anchor = anchor;
+        self.metadata.modified = true;
+    }
+
+    /// Returns the alias target name if this node is an alias.
+    pub fn alias_target(&self) -> Option<&str> {
+        self.alias_target.as_deref()
+    }
+
+    /// Sets the alias target for this node.
+    pub fn set_alias_target(&mut self, target: Option<String>) {
+        self.alias_target = target;
         self.metadata.modified = true;
     }
 

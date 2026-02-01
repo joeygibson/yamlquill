@@ -30,6 +30,62 @@
 //! ```
 
 use super::node::{YamlNode, YamlValue};
+use std::collections::HashMap;
+
+/// Tracks anchor definitions and alias references within a YAML tree.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AnchorRegistry {
+    /// Maps anchor names to the path of the node with that anchor
+    anchor_definitions: HashMap<String, Vec<usize>>,
+
+    /// Maps alias node paths to the anchor name they reference
+    alias_references: HashMap<Vec<usize>, String>,
+}
+
+impl AnchorRegistry {
+    /// Creates a new empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers an anchor definition at the given path.
+    pub fn register_anchor(&mut self, name: String, path: Vec<usize>) {
+        self.anchor_definitions.insert(name, path);
+    }
+
+    /// Registers an alias reference at the given path.
+    pub fn register_alias(&mut self, path: Vec<usize>, target: String) {
+        self.alias_references.insert(path, target);
+    }
+
+    /// Returns the path to the node with the given anchor name.
+    pub fn get_anchor_path(&self, name: &str) -> Option<&Vec<usize>> {
+        self.anchor_definitions.get(name)
+    }
+
+    /// Returns all alias paths that reference the given anchor.
+    pub fn get_aliases_for(&self, anchor: &str) -> Vec<&Vec<usize>> {
+        self.alias_references
+            .iter()
+            .filter(|(_, target)| target.as_str() == anchor)
+            .map(|(path, _)| path)
+            .collect()
+    }
+
+    /// Returns true if the anchor can be safely deleted (no aliases reference it).
+    pub fn can_delete_anchor(&self, name: &str) -> bool {
+        self.get_aliases_for(name).is_empty()
+    }
+
+    /// Removes all registrations for a node at the given path.
+    pub fn remove_node(&mut self, path: &[usize]) {
+        // Remove if it's an alias
+        self.alias_references.remove(path);
+
+        // Remove if it's an anchor (need to find by path)
+        self.anchor_definitions.retain(|_, p| p != path);
+    }
+}
 
 /// A complete YAML document tree.
 ///
@@ -40,6 +96,8 @@ pub struct YamlTree {
     root: YamlNode,
     /// The original YAML string (preserved for unmodified nodes)
     original_source: Option<String>,
+    /// Tracks anchor definitions and alias references
+    anchor_registry: AnchorRegistry,
 }
 
 impl YamlTree {
@@ -61,6 +119,7 @@ impl YamlTree {
         Self {
             root,
             original_source: None,
+            anchor_registry: AnchorRegistry::new(),
         }
     }
 
@@ -71,12 +130,23 @@ impl YamlTree {
         Self {
             root,
             original_source,
+            anchor_registry: AnchorRegistry::new(),
         }
     }
 
     /// Returns a reference to the original YAML source, if available.
     pub fn original_source(&self) -> Option<&str> {
         self.original_source.as_deref()
+    }
+
+    /// Returns a reference to the anchor registry.
+    pub fn anchor_registry(&self) -> &AnchorRegistry {
+        &self.anchor_registry
+    }
+
+    /// Returns a mutable reference to the anchor registry.
+    pub fn anchor_registry_mut(&mut self) -> &mut AnchorRegistry {
+        &mut self.anchor_registry
     }
 
     /// Returns a reference to the root node of the tree.
