@@ -154,3 +154,78 @@ items:
         _ => panic!("Expected object"),
     }
 }
+
+/// Test 5: Hashes in strings should not be treated as comments
+#[test]
+fn test_hash_in_quoted_strings() {
+    let yaml = r#"
+# Real comment
+url: "http://example.com#fragment"
+tag: 'value with # hash'
+normal: value  # real comment
+"#;
+
+    let node = parse_yaml_auto(yaml).unwrap();
+
+    match node.value() {
+        YamlValue::Object(map) => {
+            // Check that URL and tag values contain the hash character
+            let url = map.get("url").expect("Expected url key");
+            match url.value() {
+                YamlValue::String(s) => {
+                    let url_str = s.to_string();
+                    assert!(
+                        url_str.contains("#fragment"),
+                        "URL should contain #fragment, got: {}",
+                        url_str
+                    );
+                }
+                _ => panic!("Expected string value for url"),
+            }
+
+            let tag = map.get("tag").expect("Expected tag key");
+            match tag.value() {
+                YamlValue::String(s) => {
+                    let tag_str = s.to_string();
+                    assert!(
+                        tag_str.contains("# hash"),
+                        "Tag should contain # hash, got: {}",
+                        tag_str
+                    );
+                }
+                _ => panic!("Expected string value for tag"),
+            }
+
+            // Check that we only have 2 real comments (not 4)
+            let comment_count = map
+                .iter()
+                .filter(|(key, _)| key.starts_with("__comment_"))
+                .count();
+            assert_eq!(comment_count, 2, "Should have exactly 2 comments, not 4");
+
+            // Verify the actual comment contents
+            let mut found_real_comment = false;
+            let mut found_inline_comment = false;
+
+            for (key, val) in map.iter() {
+                if key.starts_with("__comment_") {
+                    match val.value() {
+                        YamlValue::Comment(comment) => {
+                            let content = comment.content();
+                            if content.contains("Real comment") {
+                                found_real_comment = true;
+                            } else if content.contains("real comment") {
+                                found_inline_comment = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            assert!(found_real_comment, "Should find 'Real comment'");
+            assert!(found_inline_comment, "Should find 'real comment'");
+        }
+        _ => panic!("Expected object"),
+    }
+}

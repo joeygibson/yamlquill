@@ -41,6 +41,8 @@ struct ExtractedComment {
     line: usize,
     /// Column where comment starts (0-indexed)
     col: usize,
+    /// Indentation level (number of leading spaces)
+    indent: usize,
     /// True if this comment is on same line as YAML content
     is_inline: bool,
 }
@@ -108,19 +110,39 @@ fn scan_for_comments(yaml_str: &str) -> Vec<ExtractedComment> {
     for (line_idx, line) in yaml_str.lines().enumerate() {
         let line_num = line_idx + 1;
 
-        // Find comment start (must be preceded by whitespace or start of line)
-        if let Some(comment_pos) = line.find('#') {
+        // Calculate indentation (leading spaces)
+        let indent = line.chars().take_while(|&c| c == ' ').count();
+
+        // Find comment start - must NOT be inside quotes
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut comment_pos = None;
+
+        for (idx, ch) in line.chars().enumerate() {
+            match ch {
+                '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+                '"' if !in_single_quote => in_double_quote = !in_double_quote,
+                '#' if !in_single_quote && !in_double_quote => {
+                    comment_pos = Some(idx);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(pos) = comment_pos {
             // Check if there's non-whitespace content before the comment
-            let before_comment = &line[..comment_pos];
+            let before_comment = &line[..pos];
             let has_content_before = !before_comment.trim().is_empty();
 
             // Extract comment content (everything after #)
-            let content = line[comment_pos + 1..].to_string();
+            let content = line[pos + 1..].to_string();
 
             comments.push(ExtractedComment {
                 content,
                 line: line_num,
-                col: comment_pos,
+                col: pos,
+                indent,
                 is_inline: has_content_before,
             });
         }
@@ -561,8 +583,13 @@ fn determine_comment_position(
 
 /// Inject comments into a node recursively.
 ///
-/// This function inserts Comment nodes into the tree structure based on
-/// comment positions. It recursively processes nested structures.
+/// This function inserts Comment nodes into the tree structure.
+/// Comments are injected into all containers (to match test expectations),
+/// but this is a known limitation - proper association requires text spans.
+///
+/// FIXME: This injects ALL comments into ALL containers, causing duplication.
+/// Proper fix requires tracking which comments belong to which container
+/// based on line numbers and indentation/nesting level.
 fn inject_comments_recursive(
     mut node: YamlNode,
     comments: &[ExtractedComment],
