@@ -334,6 +334,28 @@ impl InputHandler {
                                         state.cancel_add_operation();
                                     }
                                 }
+                            } else if matches!(
+                                state.add_mode_stage(),
+                                &AddModeStage::AwaitingComment
+                            ) {
+                                // Commit comment add operation
+                                use crate::editor::state::MessageLevel;
+                                match state.commit_add_comment() {
+                                    Ok(_) => {
+                                        state.set_mode(EditorMode::Normal);
+                                        state.set_message(
+                                            "Comment added".to_string(),
+                                            MessageLevel::Info,
+                                        );
+                                    }
+                                    Err(e) => {
+                                        state.set_message(
+                                            format!("Add comment failed: {}", e),
+                                            MessageLevel::Error,
+                                        );
+                                        state.cancel_add_comment();
+                                    }
+                                }
                             } else {
                                 // Normal commit editing
                                 use crate::editor::state::MessageLevel;
@@ -1365,6 +1387,32 @@ impl InputHandler {
                         Err(msg) => {
                             state.set_message(msg, MessageLevel::Error);
                         }
+                    }
+                }
+                InputEvent::AddComment => {
+                    state.clear_pending();
+                    state.clear_search_results();
+                    use crate::editor::state::MessageLevel;
+
+                    // Check if cursor is on a value node (not a comment)
+                    if let Some(current_node) = state.tree().get_node(state.cursor().path()) {
+                        match current_node.value() {
+                            crate::document::node::YamlValue::Comment(_) => {
+                                // Can't add comment to comment
+                                state.set_message(
+                                    "Cannot add comment to comment node".to_string(),
+                                    MessageLevel::Error,
+                                );
+                            }
+                            _ => {
+                                // Start add comment operation
+                                // For now, we'll add a simple prompt-based implementation
+                                // TODO: Implement position prompt UI (Above/Line/Below)
+                                state.start_add_comment_operation();
+                            }
+                        }
+                    } else {
+                        state.set_message("No node at cursor".to_string(), MessageLevel::Error);
                     }
                 }
                 InputEvent::Unknown => {

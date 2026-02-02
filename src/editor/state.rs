@@ -192,6 +192,8 @@ pub enum AddModeStage {
     AwaitingKey,
     /// Key entered or skipped (arrays), waiting for value input
     AwaitingValue,
+    /// Pressed 'c' to add comment, waiting for comment text input
+    AwaitingComment,
 }
 
 pub struct EditorState {
@@ -3972,6 +3974,138 @@ impl EditorState {
     /// Returns whether we're currently in rename mode.
     pub fn is_renaming_key(&self) -> bool {
         self.is_renaming_key
+    }
+
+    /// Starts a comment addition operation at the current cursor position.
+    ///
+    /// Opens an edit prompt for entering the comment text. The comment will be
+    /// added at the cursor position with a default position of Above.
+    ///
+    /// For now, this implementation adds comments with CommentPosition::Above.
+    /// A future enhancement could prompt the user to select the position type
+    /// (Above/Line/Below).
+    pub fn start_add_comment_operation(&mut self) {
+        use crate::document::node::YamlValue;
+
+        // Clear any previous messages so the edit area is visible
+        self.clear_message();
+
+        // Verify cursor is on a valid node (not a comment)
+        let current_path = self.cursor.path().to_vec();
+        if let Some(current_node) = self.tree.get_node(&current_path) {
+            match current_node.value() {
+                YamlValue::Comment(_) => {
+                    self.set_message(
+                        "Cannot add comment to comment node".to_string(),
+                        MessageLevel::Error,
+                    );
+                }
+                _ => {
+                    // Valid node - start comment entry
+                    // Enter Insert mode with empty edit buffer
+                    self.edit_buffer = Some(String::new());
+                    self.edit_cursor = 0;
+                    self.set_mode(EditorMode::Insert);
+                    self.reset_cursor_blink();
+                    // Set mode indicator message with prompt
+                    self.set_message(
+                        "-- INSERT (Comment) -- Enter text and press Enter to save, Esc to cancel"
+                            .to_string(),
+                        MessageLevel::Info,
+                    );
+                    // Store that we're in comment-add mode
+                    // We'll use the add_mode_stage for this
+                    self.add_mode_stage = AddModeStage::AwaitingComment;
+                }
+            }
+        } else {
+            self.set_message("No node at cursor".to_string(), MessageLevel::Error);
+        }
+    }
+
+    /// Commits a comment add operation after receiving the comment text.
+    ///
+    /// Creates a new Comment node with the entered text and inserts it into
+    /// the tree near the current cursor position. Currently adds comments with
+    /// CommentPosition::Above.
+    pub fn commit_add_comment(&mut self) -> anyhow::Result<()> {
+        use crate::document::node::{CommentNode, CommentPosition, YamlNode, YamlValue};
+        use anyhow::anyhow;
+
+        // Get the comment text from edit buffer
+        let comment_text = self
+            .edit_buffer
+            .clone()
+            .ok_or_else(|| anyhow!("No comment text in buffer"))?;
+
+        // Empty comments are allowed
+        // Create a comment node with Above position (TODO: prompt for position)
+        let comment_node = YamlNode::new(YamlValue::Comment(CommentNode::new(
+            comment_text,
+            CommentPosition::Above,
+        )));
+
+        // Get current path
+        let current_path = self.cursor.path().to_vec();
+
+        // Insert comment as sibling before current node
+        // This requires getting the parent and inserting at the current index
+        if current_path.is_empty() {
+            // Can't add comment to root
+            return Err(anyhow!("Cannot add comment to root node"));
+        }
+
+        let parent_path = &current_path[..current_path.len() - 1];
+        let current_index = current_path[current_path.len() - 1];
+
+        let parent = if parent_path.is_empty() {
+            self.tree.root_mut()
+        } else {
+            self.tree
+                .get_node_mut(parent_path)
+                .ok_or_else(|| anyhow!("Parent node not found"))?
+        };
+
+        match parent.value_mut() {
+            YamlValue::Array(arr) => {
+                // Insert comment before current element in array
+                arr.insert(current_index, comment_node);
+                self.mark_dirty();
+                self.rebuild_tree_view();
+                self.checkpoint();
+            }
+            YamlValue::Object(_) => {
+                // For objects, we can't easily insert before a key-value pair
+                // For now, return an error
+                return Err(anyhow!(
+                    "Adding comments to object entries not yet supported. Use arrays or standalone comments."
+                ));
+            }
+            YamlValue::MultiDoc(docs) => {
+                // Insert comment before current document
+                docs.insert(current_index, comment_node);
+                self.mark_dirty();
+                self.rebuild_tree_view();
+                self.checkpoint();
+            }
+            _ => {
+                return Err(anyhow!("Parent is not a container"));
+            }
+        }
+
+        // Clear add mode state
+        self.add_mode_stage = AddModeStage::None;
+        self.edit_buffer = None;
+        self.edit_cursor = 0;
+
+        Ok(())
+    }
+
+    /// Cancels a comment add operation.
+    pub fn cancel_add_comment(&mut self) {
+        self.add_mode_stage = AddModeStage::None;
+        self.edit_buffer = None;
+        self.edit_cursor = 0;
     }
 
     /// Commits a container add operation after receiving the key name.

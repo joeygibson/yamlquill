@@ -107,6 +107,8 @@ pub enum InputEvent {
     JumpToAnchor,
     /// Repeat last command (.)
     Repeat,
+    /// Add a comment to the current node (c)
+    AddComment,
     /// Insert a character in insert mode
     InsertCharacter(char),
     /// Backspace in insert mode
@@ -204,6 +206,7 @@ pub fn map_key_event(event: Event, mode: &EditorMode) -> InputEvent {
             Key::Char('m') => InputEvent::MarkSet,
             Key::Char('\'') => InputEvent::MarkJump,
             Key::Char('.') => InputEvent::Repeat,
+            Key::Char('c') => InputEvent::AddComment,
             Key::Down => InputEvent::MoveDown,
             Key::Up => InputEvent::MoveUp,
             Key::Left => InputEvent::MoveLeft,
