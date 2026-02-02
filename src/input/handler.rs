@@ -425,6 +425,12 @@ impl InputHandler {
                                 // Cancel add operation
                                 state.cancel_editing();
                                 state.cancel_add_operation();
+                            } else if matches!(
+                                state.add_mode_stage(),
+                                &AddModeStage::AwaitingComment
+                            ) {
+                                // Cancel comment add operation
+                                state.cancel_add_comment();
                             } else {
                                 // Normal cancel editing
                                 state.cancel_editing();
