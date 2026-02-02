@@ -1,5 +1,5 @@
 // tests/comment_data_model_tests.rs
-use yamlquill::document::node::{CommentNode, CommentPosition, YamlValue, YamlNode};
+use yamlquill::document::node::{CommentNode, CommentPosition, YamlNode, YamlValue};
 
 #[test]
 fn test_comment_node_creation() {
@@ -29,7 +29,9 @@ fn test_yaml_node_is_comment() {
     }));
     assert!(comment.is_comment());
 
-    let string = YamlNode::new(YamlValue::String(yamlquill::document::node::YamlString::Plain("text".to_string())));
+    let string = YamlNode::new(YamlValue::String(
+        yamlquill::document::node::YamlString::Plain("text".to_string()),
+    ));
     assert!(!string.is_comment());
 }
 

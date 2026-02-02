@@ -19,13 +19,31 @@
 //! let node = parse_yaml(yaml).unwrap();
 //! ```
 
-use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
+use crate::document::node::{
+    CommentNode, CommentPosition, YamlNode, YamlNumber, YamlString, YamlValue,
+};
 use anyhow::{bail, Context, Result};
 use indexmap::IndexMap;
 use serde_yaml::{self, Value};
 use std::collections::HashMap;
 use yaml_rust2::parser::{Event, EventReceiver, Parser};
 use yaml_rust2::scanner::{Scanner, TokenType};
+
+/// Represents a comment found in YAML source.
+///
+/// Comments are extracted by scanning the raw YAML text before parsing.
+/// Each comment tracks its content, line number, and column for positioning.
+#[derive(Debug, Clone, PartialEq)]
+struct ExtractedComment {
+    /// Comment text without the '#' prefix
+    content: String,
+    /// Line number (1-indexed)
+    line: usize,
+    /// Column where comment starts (0-indexed)
+    col: usize,
+    /// True if this comment is on same line as YAML content
+    is_inline: bool,
+}
 
 /// Maps anchor/alias names extracted from Scanner to their positions.
 ///
@@ -55,6 +73,60 @@ impl AnchorMap {
             self.id_to_name.insert(idx + 1, name.clone());
         }
     }
+}
+
+/// Scans YAML source text for comments.
+///
+/// Since yaml-rust2's Scanner skips comments, we need to manually scan
+/// the raw text to find all comments before parsing. This function
+/// identifies both inline comments (on same line as content) and
+/// standalone comments (on their own lines).
+///
+/// # Arguments
+///
+/// * `yaml_str` - The YAML source text to scan
+///
+/// # Returns
+///
+/// Returns a `Vec<ExtractedComment>` containing all discovered comments
+/// with their positions and content.
+///
+/// # Example
+///
+/// ```ignore
+/// let yaml = r#"
+/// # Comment above
+/// name: Alice  # inline comment
+/// "#;
+/// let comments = scan_for_comments(yaml);
+/// // comments[0]: Above comment on line 2
+/// // comments[1]: Inline comment on line 3
+/// ```
+fn scan_for_comments(yaml_str: &str) -> Vec<ExtractedComment> {
+    let mut comments = Vec::new();
+
+    for (line_idx, line) in yaml_str.lines().enumerate() {
+        let line_num = line_idx + 1;
+
+        // Find comment start (must be preceded by whitespace or start of line)
+        if let Some(comment_pos) = line.find('#') {
+            // Check if there's non-whitespace content before the comment
+            let before_comment = &line[..comment_pos];
+            let has_content_before = !before_comment.trim().is_empty();
+
+            // Extract comment content (everything after #)
+            let content = line[comment_pos + 1..].to_string();
+
+            comments.push(ExtractedComment {
+                content,
+                line: line_num,
+                col: comment_pos,
+                is_inline: has_content_before,
+            });
+        }
+    }
+
+    comments
 }
 
 /// Scans YAML source text for anchor definitions and alias references.
@@ -115,6 +187,8 @@ struct TreeBuilder {
     anchor_map: AnchorMap,
     /// All completed document root nodes
     documents: Vec<YamlNode>,
+    /// Comments extracted from source (to be injected after parsing)
+    comments: Vec<ExtractedComment>,
 }
 
 /// Represents a node being built (may be incomplete)
@@ -133,11 +207,12 @@ enum BuildNode {
 }
 
 impl TreeBuilder {
-    fn new(anchor_map: AnchorMap) -> Self {
+    fn new(anchor_map: AnchorMap, comments: Vec<ExtractedComment>) -> Self {
         Self {
             stack: Vec::new(),
             anchor_map,
             documents: Vec::new(),
+            comments,
         }
     }
 
@@ -452,6 +527,121 @@ fn convert_value(value: Value) -> Result<YamlNode> {
     })
 }
 
+/// Determine comment position based on context.
+///
+/// Detects whether a comment is standalone (surrounded by blank lines)
+/// by checking if it has blank lines before and after.
+fn determine_comment_position(
+    yaml_lines: &[&str],
+    comment_line_idx: usize,
+    is_inline: bool,
+) -> CommentPosition {
+    if is_inline {
+        return CommentPosition::Line;
+    }
+
+    // Check if this is a standalone comment (blank lines before and after)
+    let has_blank_before = comment_line_idx == 0
+        || yaml_lines
+            .get(comment_line_idx - 1)
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false);
+
+    let has_blank_after = yaml_lines
+        .get(comment_line_idx + 1)
+        .map(|line| line.trim().is_empty())
+        .unwrap_or(true);
+
+    if has_blank_before && has_blank_after {
+        CommentPosition::Standalone
+    } else {
+        CommentPosition::Above
+    }
+}
+
+/// Inject comments into a node recursively.
+///
+/// This function inserts Comment nodes into the tree structure based on
+/// comment positions. It recursively processes nested structures.
+fn inject_comments_recursive(
+    mut node: YamlNode,
+    comments: &[ExtractedComment],
+    comment_counter: &mut usize,
+    yaml_lines: &[&str],
+) -> YamlNode {
+    match &mut node.value {
+        YamlValue::Object(map) => {
+            // Recursively inject into child nodes
+            let mut new_map = IndexMap::new();
+            for (key, child) in map.drain(..) {
+                let processed_child =
+                    inject_comments_recursive(child, comments, comment_counter, yaml_lines);
+                new_map.insert(key, processed_child);
+            }
+
+            // Add comments at this level
+            for comment in comments {
+                let line_idx = comment.line - 1;
+                let position = determine_comment_position(yaml_lines, line_idx, comment.is_inline);
+
+                let comment_node = YamlNode::new(YamlValue::Comment(CommentNode::new(
+                    comment.content.trim().to_string(),
+                    position,
+                )));
+
+                let key = format!("__comment_{}__", *comment_counter);
+                *comment_counter += 1;
+                new_map.insert(key, comment_node);
+            }
+
+            node.value = YamlValue::Object(new_map);
+        }
+        YamlValue::Array(elements) => {
+            // Recursively inject into child elements
+            let mut new_elements = Vec::new();
+            for child in elements.drain(..) {
+                let processed_child =
+                    inject_comments_recursive(child, comments, comment_counter, yaml_lines);
+                new_elements.push(processed_child);
+            }
+
+            // Add comments as array elements
+            for comment in comments {
+                let line_idx = comment.line - 1;
+                let position = determine_comment_position(yaml_lines, line_idx, comment.is_inline);
+
+                let comment_node = YamlNode::new(YamlValue::Comment(CommentNode::new(
+                    comment.content.trim().to_string(),
+                    position,
+                )));
+
+                new_elements.push(comment_node);
+            }
+
+            node.value = YamlValue::Array(new_elements);
+        }
+        _ => {
+            // Scalar values: no children to process
+        }
+    }
+
+    node
+}
+
+/// Inject comments into the root node after parsing completes.
+///
+/// This function inserts Comment nodes into the tree structure based on
+/// comment positions determined from line numbers and inline status.
+fn inject_comments_into_tree(
+    root: YamlNode,
+    comments: &[ExtractedComment],
+    comment_counter: &mut usize,
+    yaml_str: &str,
+) -> YamlNode {
+    let yaml_lines: Vec<&str> = yaml_str.lines().collect();
+    inject_comments_recursive(root, comments, comment_counter, &yaml_lines)
+}
+
 /// Parses YAML with automatic single/multi-document detection.
 ///
 /// Detects whether the input contains multiple documents (separated by `---`)
@@ -487,23 +677,36 @@ fn convert_value(value: Value) -> Result<YamlNode> {
 /// let anchored = parse_yaml_auto("defaults: &config\n  timeout: 30\napi:\n  settings: *config").unwrap();
 /// ```
 pub fn parse_yaml_auto(yaml_str: &str) -> Result<YamlNode> {
-    // Pass 1: Scan for anchor/alias names
+    // Pass 1: Scan for comments (before yaml-rust2 skips them)
+    let comments = scan_for_comments(yaml_str);
+
+    // Pass 2: Scan for anchor/alias names
     let mut anchor_map = scan_for_anchors(yaml_str);
     anchor_map.build_id_mapping();
 
-    // Pass 2: Parse with Parser + TreeBuilder
+    // Pass 3: Parse with Parser + TreeBuilder
     let mut parser = Parser::new(yaml_str.chars());
-    let mut builder = TreeBuilder::new(anchor_map);
+    let mut builder = TreeBuilder::new(anchor_map, comments);
 
     parser
         .load(&mut builder, true)
         .context("Failed to parse YAML with Parser")?;
 
+    // Pass 4: Inject comments into parsed tree
+    let mut comment_counter = 0;
+    let documents: Vec<YamlNode> = builder
+        .documents
+        .into_iter()
+        .map(|doc| {
+            inject_comments_into_tree(doc, &builder.comments, &mut comment_counter, yaml_str)
+        })
+        .collect();
+
     // Return single document or MultiDoc
-    match builder.documents.len() {
+    match documents.len() {
         0 => bail!("No YAML documents found"),
-        1 => Ok(builder.documents.into_iter().next().unwrap()),
-        _ => Ok(YamlNode::new(YamlValue::MultiDoc(builder.documents))),
+        1 => Ok(documents.into_iter().next().unwrap()),
+        _ => Ok(YamlNode::new(YamlValue::MultiDoc(documents))),
     }
 }
 
