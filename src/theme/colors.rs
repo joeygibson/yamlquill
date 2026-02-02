@@ -65,6 +65,8 @@ pub struct ThemeColors {
     pub preview: Color,
     /// Background color for visual mode selection.
     pub visual_selection_bg: Color,
+    /// Color for YAML comments.
+    pub comment: Color,
 }
 
 impl ThemeColors {
@@ -116,6 +118,7 @@ impl ThemeColors {
             search_highlight: Color::Yellow,      // ANSI 3 (jless uses yellow for search)
             preview: Color::DarkGray,             // ANSI 8 for collapsed previews
             visual_selection_bg: Color::DarkGray, // ANSI 8 for visual mode selection
+            comment: Color::DarkGray,             // ANSI 8 for comments
         }
     }
 
@@ -159,6 +162,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(220, 220, 220),
             preview: Color::DarkGray, // ANSI 8 for collapsed previews
             visual_selection_bg: Color::Rgb(220, 220, 220), // Light gray for visual selection
+            comment: Color::Rgb(160, 160, 160), // Medium gray for comments
         }
     }
 
@@ -186,6 +190,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(215, 153, 33),  // yellow highlight
             preview: Color::Rgb(146, 131, 116),          // gray
             visual_selection_bg: Color::Rgb(60, 56, 54), // darker gray for selection
+            comment: Color::Rgb(146, 131, 116),          // gray for comments
         }
     }
 
@@ -213,6 +218,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(235, 203, 139), // aurora yellow
             preview: Color::Rgb(76, 86, 106),            // polar night gray
             visual_selection_bg: Color::Rgb(59, 66, 82), // polar night for selection
+            comment: Color::Rgb(76, 86, 106),            // polar night gray for comments
         }
     }
 
@@ -240,6 +246,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(255, 121, 198), // pink
             preview: Color::Rgb(98, 114, 164),           // comment
             visual_selection_bg: Color::Rgb(68, 71, 90), // current line for selection
+            comment: Color::Rgb(98, 114, 164),           // comment color for comments
         }
     }
 
@@ -267,6 +274,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(181, 137, 0),  // yellow
             preview: Color::Rgb(88, 110, 117),          // base01
             visual_selection_bg: Color::Rgb(7, 54, 66), // base02 for selection
+            comment: Color::Rgb(88, 110, 117),          // base01 for comments
         }
     }
 
@@ -293,6 +301,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(230, 219, 116), // yellow
             preview: Color::Rgb(117, 113, 94),           // comment
             visual_selection_bg: Color::Rgb(73, 72, 62), // line highlight for selection
+            comment: Color::Rgb(117, 113, 94),           // comment color for comments
         }
     }
 
@@ -320,6 +329,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(229, 192, 123), // yellow
             preview: Color::Rgb(92, 99, 112),            // comment
             visual_selection_bg: Color::Rgb(33, 37, 43), // gutter bg for selection
+            comment: Color::Rgb(92, 99, 112),            // comment color for comments
         }
     }
 
@@ -347,6 +357,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(250, 189, 47),     // bright yellow
             preview: Color::Rgb(102, 92, 84),               // gray
             visual_selection_bg: Color::Rgb(235, 219, 178), // lighter bg for selection
+            comment: Color::Rgb(102, 92, 84),               // gray for comments
         }
     }
 
@@ -374,6 +385,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(181, 137, 0),      // yellow
             preview: Color::Rgb(147, 161, 161),             // base1
             visual_selection_bg: Color::Rgb(238, 232, 213), // base2 for selection
+            comment: Color::Rgb(147, 161, 161),             // base1 for comments
         }
     }
 
@@ -401,6 +413,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(224, 175, 104), // yellow
             preview: Color::Rgb(86, 95, 137),            // gray
             visual_selection_bg: Color::Rgb(36, 40, 59), // darker bg for selection
+            comment: Color::Rgb(86, 95, 137),            // gray for comments
         }
     }
 
@@ -428,6 +441,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(249, 226, 175), // yellow
             preview: Color::Rgb(108, 112, 134),          // surface2
             visual_selection_bg: Color::Rgb(49, 50, 68), // mantle for selection
+            comment: Color::Rgb(108, 112, 134),          // surface2 for comments
         }
     }
 
@@ -455,6 +469,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(223, 142, 29),     // yellow
             preview: Color::Rgb(156, 160, 176),             // surface2
             visual_selection_bg: Color::Rgb(230, 233, 239), // mantle for selection
+            comment: Color::Rgb(156, 160, 176),             // surface2 for comments
         }
     }
 
@@ -482,6 +497,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(224, 155, 90),  // severe fg
             preview: Color::Rgb(110, 118, 129),          // gray
             visual_selection_bg: Color::Rgb(22, 27, 34), // canvas subtle for selection
+            comment: Color::Rgb(110, 118, 129),          // gray for comments
         }
     }
 
@@ -509,6 +525,7 @@ impl ThemeColors {
             search_highlight: Color::Rgb(191, 87, 0), // severe fg
             preview: Color::Rgb(87, 96, 106),         // gray
             visual_selection_bg: Color::Rgb(246, 248, 250), // canvas subtle for selection
+            comment: Color::Rgb(87, 96, 106),         // gray for comments
         }
     }
 }

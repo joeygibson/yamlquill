@@ -274,6 +274,12 @@ impl TreeViewState {
                         path.iter().copied().chain(std::iter::once(i)).collect();
                     let expanded = self.is_expanded(&child_path);
 
+                    // Check if this is a comment node
+                    let is_comment = key.starts_with("__comment_");
+
+                    // For comments, hide the key and show content in preview
+                    let display_key = if is_comment { None } else { Some(key.clone()) };
+
                     // Always use collapsed preview for containers
                     let value_preview = if child.value().is_container() {
                         format_collapsed_preview(child, 60)
@@ -286,7 +292,7 @@ impl TreeViewState {
                     self.lines.push(TreeViewLine {
                         path: child_path.clone(),
                         depth,
-                        key: Some(key.clone()),
+                        key: display_key,
                         value_type: ValueType::from_yaml_value(child.value()),
                         value_preview,
                         expandable: child.value().is_container(),
@@ -343,7 +349,14 @@ impl TreeViewState {
             YamlValue::Boolean(b) => b.to_string(),
             YamlValue::Null => "null".to_string(),
             YamlValue::Alias(name) => format!("*{}", name),
-            YamlValue::Comment(c) => format!("# {}", c.content),
+            YamlValue::Comment(c) => {
+                // For comments, show the content with # prefix
+                if c.content().is_empty() {
+                    "#".to_string()
+                } else {
+                    format!("# {}", c.content())
+                }
+            }
         }
     }
 
@@ -634,12 +647,20 @@ pub fn render_tree_view(
         }
 
         // Value - highlight when cursor is on this line
+        // Check if this is a comment (no key and starts with #)
+        let is_comment = line.key.is_none() && line.value_preview.starts_with('#');
+
         let value_style = if is_cursor {
             // All values on cursor line get same highlight as keys for consistent visibility
             Style::default()
                 .fg(Color::White)
                 .bg(colors.cursor)
                 .add_modifier(Modifier::BOLD)
+        } else if is_comment {
+            // Comments use special comment color and dim modifier
+            Style::default()
+                .fg(colors.comment)
+                .add_modifier(Modifier::DIM)
         } else {
             let value_color = if line.expandable {
                 // All containers use preview color (they show collapsed preview format)
