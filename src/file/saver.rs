@@ -4,7 +4,7 @@
 //! atomic write operations and optional backup creation.
 
 use crate::config::Config;
-use crate::document::node::{YamlNode, YamlNumber, YamlValue};
+use crate::document::node::{CommentNode, CommentPosition, YamlNode, YamlNumber, YamlValue};
 use crate::document::tree::YamlTree;
 use anyhow::{Context, Result};
 use serde_yaml::Value;
@@ -73,6 +73,10 @@ fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
         YamlValue::Object(entries) => {
             let mut map = serde_yaml::Mapping::new();
             for (key, value) in entries {
+                // Skip comment nodes - they'll be injected separately
+                if key.starts_with("__comment_") {
+                    continue;
+                }
                 map.insert(Value::String(key.clone()), convert_to_serde_value(value)?);
             }
             Value::Mapping(map)
@@ -94,6 +98,165 @@ fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
     };
 
     Ok(value)
+}
+
+/// Information about a comment and its location in the tree
+#[derive(Debug, Clone)]
+struct CommentInfo {
+    /// The comment node
+    comment: CommentNode,
+    /// The key this comment is associated with (for Above/Line comments)
+    associated_key: Option<String>,
+}
+
+/// Collects all comments from a YAML tree
+fn collect_comments(node: &YamlNode) -> Vec<CommentInfo> {
+    let mut comments = Vec::new();
+
+    match node.value() {
+        YamlValue::Object(entries) => {
+            // Collect comments from this object
+            for (key, value) in entries {
+                if key.starts_with("__comment_") {
+                    if let YamlValue::Comment(comment) = value.value() {
+                        // Try to find the associated key for Above/Line comments
+                        let associated_key = find_associated_key(entries, key, comment);
+                        comments.push(CommentInfo {
+                            comment: comment.clone(),
+                            associated_key,
+                        });
+                    }
+                } else {
+                    // Recursively collect from nested structures
+                    comments.extend(collect_comments(value));
+                }
+            }
+        }
+        YamlValue::Array(elements) => {
+            for element in elements.iter() {
+                comments.extend(collect_comments(element));
+            }
+        }
+        YamlValue::MultiDoc(docs) => {
+            for doc in docs.iter() {
+                comments.extend(collect_comments(doc));
+            }
+        }
+        _ => {}
+    }
+
+    comments
+}
+
+/// Find the key associated with a comment in an object.
+///
+/// Uses a heuristic: looks for key names mentioned in the comment content.
+/// This is not perfect but works for common cases like "# Comment above name".
+fn find_associated_key(
+    entries: &indexmap::IndexMap<String, YamlNode>,
+    _comment_key: &str,
+    comment: &CommentNode,
+) -> Option<String> {
+    match comment.position() {
+        CommentPosition::Above | CommentPosition::Line => {
+            // Heuristic: look for key names mentioned in the comment
+            let content_lower = comment.content().to_lowercase();
+
+            for (key, _) in entries {
+                if !key.starts_with("__comment_") {
+                    // Check if this key name appears in the comment
+                    if content_lower.contains(&key.to_lowercase()) {
+                        return Some(key.clone());
+                    }
+                }
+            }
+
+            // Fallback: use the first non-comment key
+            // This handles cases where the key isn't mentioned in the comment
+            for (key, _) in entries {
+                if !key.starts_with("__comment_") {
+                    return Some(key.clone());
+                }
+            }
+
+            None
+        }
+        CommentPosition::Below | CommentPosition::Standalone => None,
+    }
+}
+
+/// Injects comments into a YAML string
+fn inject_comments(yaml: String, comments: &[CommentInfo]) -> Result<String> {
+    if comments.is_empty() {
+        return Ok(yaml);
+    }
+
+    let mut lines: Vec<String> = yaml.lines().map(|s| s.to_string()).collect();
+
+    // Process comments in reverse order to maintain line positions
+    for comment_info in comments.iter().rev() {
+        match comment_info.comment.position() {
+            CommentPosition::Above => {
+                if let Some(ref key) = comment_info.associated_key {
+                    // Find the line containing the key
+                    if let Some(line_idx) = find_key_line(&lines, key) {
+                        // Insert comment before the key line
+                        let indent = get_line_indent(&lines[line_idx]);
+                        let comment_line =
+                            format!("{}# {}", indent, comment_info.comment.content());
+                        lines.insert(line_idx, comment_line);
+                    }
+                }
+            }
+            CommentPosition::Line => {
+                if let Some(ref key) = comment_info.associated_key {
+                    // Find the line containing the key
+                    if let Some(line_idx) = find_key_line(&lines, key) {
+                        // Append comment to the end of the line
+                        lines[line_idx] =
+                            format!("{}  # {}", lines[line_idx], comment_info.comment.content());
+                    }
+                }
+            }
+            CommentPosition::Below => {
+                // For now, add after the last line
+                // TODO: Implement proper below positioning
+                lines.push(format!("# {}", comment_info.comment.content()));
+            }
+            CommentPosition::Standalone => {
+                // Add as a standalone line with blank lines around it
+                // TODO: Implement proper standalone positioning
+                if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+                    lines.push(String::new());
+                }
+                lines.push(format!("# {}", comment_info.comment.content()));
+                lines.push(String::new());
+            }
+        }
+    }
+
+    Ok(lines.join("\n"))
+}
+
+/// Finds the line number containing a specific key
+fn find_key_line(lines: &[String], key: &str) -> Option<usize> {
+    for (i, line) in lines.iter().enumerate() {
+        // Match "key:" or "key :" patterns
+        let trimmed = line.trim_start();
+        if let Some(after_key) = trimmed.strip_prefix(key) {
+            if after_key.starts_with(':') || after_key.starts_with(' ') {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// Gets the indentation of a line
+fn get_line_indent(line: &str) -> String {
+    line.chars()
+        .take_while(|c| c.is_whitespace())
+        .collect::<String>()
 }
 
 /// Creates a backup of a file by copying it with a .bak extension.
@@ -176,14 +339,20 @@ pub fn save_yaml_file<P: AsRef<Path>>(path: P, tree: &YamlTree, config: &Config)
         create_backup(path)?;
     }
 
-    // Convert YamlNode to serde_yaml::Value
+    // Collect comments from the tree
+    let comments = collect_comments(tree.root());
+
+    // Convert YamlNode to serde_yaml::Value (comments are skipped)
     let value = convert_to_serde_value(tree.root())?;
 
     // Serialize to YAML string
     let yaml_str = serde_yaml::to_string(&value).context("Failed to serialize YAML")?;
 
+    // Inject comments back into the YAML string
+    let yaml_with_comments = inject_comments(yaml_str, &comments)?;
+
     // Write atomically (compressed or uncompressed)
-    write_file_atomic(path, yaml_str.as_bytes(), should_compress)?;
+    write_file_atomic(path, yaml_with_comments.as_bytes(), should_compress)?;
 
     Ok(())
 }
