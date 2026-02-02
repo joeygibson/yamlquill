@@ -85,6 +85,12 @@ fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
         YamlValue::MultiDoc(_) => {
             anyhow::bail!("Cannot serialize MultiDoc nodes - use save_yamll instead")
         }
+
+        YamlValue::Comment(c) => {
+            // Comments will be handled separately during save
+            // For now, skip them in the structure
+            Value::String(format!("# {}", c.content))
+        }
     };
 
     Ok(value)
@@ -426,6 +432,7 @@ pub fn serialize_node_compact(node: &YamlNode) -> String {
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
         YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
+        YamlValue::Comment(c) => format!("\"# {}\"", escape_yaml_string(&c.content)),
     }
 }
 
@@ -514,6 +521,7 @@ pub fn serialize_node_jq_style(
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
         YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
+        YamlValue::Comment(c) => format!("\"# {}\"", escape_yaml_string(&c.content)),
     }
 }
 
@@ -612,6 +620,7 @@ pub fn serialize_node(node: &YamlNode, indent_size: usize, current_depth: usize)
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
         YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
+        YamlValue::Comment(c) => format!("\"# {}\"", escape_yaml_string(&c.content)),
     }
 }
 

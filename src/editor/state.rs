@@ -2029,6 +2029,11 @@ impl EditorState {
                 // Use a string representation
                 serde_yaml::Value::String(format!("*{}", name))
             }
+            YamlValue::Comment(c) => {
+                // Comments can't be represented in serde_yaml::Value
+                // Use a string representation
+                serde_yaml::Value::String(format!("# {}", c.content))
+            }
         }
     }
 
@@ -2864,6 +2869,13 @@ impl EditorState {
                     // Unreachable - handled above with error message
                     unreachable!("Alias editing should be blocked earlier");
                 }
+                crate::document::node::YamlValue::Comment(c) => {
+                    // Pre-populate with current comment text
+                    let content = c.content().to_string();
+                    self.edit_cursor = content.len();
+                    self.edit_buffer = Some(content);
+                    self.reset_cursor_blink();
+                }
             }
         }
     }
@@ -2900,8 +2912,8 @@ impl EditorState {
                     return Err(anyhow!("Alias must be in format '*name'"));
                 }
             }
-            // Strings and Null accept any input
-            YamlValue::String(_) | YamlValue::Null => {}
+            // Strings, Null, and Comments accept any input
+            YamlValue::String(_) | YamlValue::Null | YamlValue::Comment(_) => {}
             // Containers shouldn't be editable
             YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                 return Err(anyhow!("Cannot edit container types"));
@@ -2984,6 +2996,13 @@ impl EditorState {
                     } else {
                         return Err(anyhow!("Alias must start with *"));
                     }
+                }
+                YamlValue::Comment(c) => {
+                    // Update comment content while preserving position
+                    YamlValue::Comment(crate::document::node::CommentNode::new(
+                        buffer_content,
+                        c.position().clone(),
+                    ))
                 }
                 YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                     return Err(anyhow!("Cannot edit container types"));

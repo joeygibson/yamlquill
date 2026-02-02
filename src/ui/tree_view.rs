@@ -70,6 +70,7 @@ impl ValueType {
             YamlValue::Null => ValueType::Null,
             YamlValue::Alias(_) => ValueType::String, // Treat alias as string for display
             YamlValue::MultiDoc(_) => ValueType::Array, // Treat multi-document YAML root like array for display
+            YamlValue::Comment(_) => ValueType::String, // Treat comment as string for display
         }
     }
 }
@@ -342,6 +343,7 @@ impl TreeViewState {
             YamlValue::Boolean(b) => b.to_string(),
             YamlValue::Null => "null".to_string(),
             YamlValue::Alias(name) => format!("*{}", name),
+            YamlValue::Comment(c) => format!("# {}", c.content),
         }
     }
 
@@ -755,6 +757,7 @@ pub fn format_collapsed_preview(node: &YamlNode, max_chars: usize) -> String {
         YamlValue::Boolean(b) => format!("{}", b),
         YamlValue::Null => "null".to_string(),
         YamlValue::Alias(name) => format!("*{}", name),
+        YamlValue::Comment(c) => format!("# {}", c.content),
     }
 }
 
@@ -801,6 +804,7 @@ fn format_collapsed_object(
             YamlValue::Boolean(b) => format!("{}", b),
             YamlValue::Null => "null".to_string(),
             YamlValue::Alias(name) => format!("*{}", name),
+            YamlValue::Comment(c) => format!("# {}", c.content),
         };
 
         preview.push_str(&value_str);
@@ -855,6 +859,7 @@ fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
             YamlValue::Boolean(b) => format!("{}", b),
             YamlValue::Null => "null".to_string(),
             YamlValue::Alias(name) => format!("*{}", name),
+            YamlValue::Comment(c) => format!("# {}", c.content),
         };
 
         preview.push_str(&value_str);

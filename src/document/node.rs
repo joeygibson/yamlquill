@@ -107,6 +107,45 @@ impl YamlNumber {
     }
 }
 
+/// Position of a comment relative to YAML nodes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommentPosition {
+    /// Comment line(s) before a value
+    Above,
+    /// Inline comment after a value on the same line
+    Line,
+    /// Comment after children/end of block
+    Below,
+    /// Comment between blank lines (not associated with specific value)
+    Standalone,
+}
+
+/// A YAML comment node
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommentNode {
+    /// Comment text without the '#' prefix
+    pub content: String,
+    /// Position of this comment relative to other nodes
+    pub position: CommentPosition,
+}
+
+impl CommentNode {
+    /// Create a new comment node
+    pub fn new(content: String, position: CommentPosition) -> Self {
+        Self { content, position }
+    }
+
+    /// Get the comment content
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    /// Get the comment position
+    pub fn position(&self) -> &CommentPosition {
+        &self.position
+    }
+}
+
 /// A YAML value without metadata.
 ///
 /// This enum represents the core YAML types: objects, arrays, strings, numbers,
@@ -130,6 +169,8 @@ pub enum YamlValue {
     Alias(String),
     /// A multi-document YAML file (each document is a YamlNode)
     MultiDoc(Vec<YamlNode>),
+    /// A YAML comment
+    Comment(CommentNode),
 }
 
 /// A YAML value wrapped with metadata for tracking changes and formatting.
@@ -217,6 +258,11 @@ impl YamlValue {
             self,
             YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_)
         )
+    }
+
+    /// Returns true if this value is a comment.
+    pub fn is_comment(&self) -> bool {
+        matches!(self, YamlValue::Comment(_))
     }
 
     /// Check if this value can be converted to the target type
@@ -313,6 +359,7 @@ impl std::fmt::Display for YamlValue {
             YamlValue::Object(_) => write!(f, "{{object}}"),
             YamlValue::Alias(a) => write!(f, "*{}", a),
             YamlValue::MultiDoc(_) => write!(f, "[multi-doc]"),
+            YamlValue::Comment(c) => write!(f, "# {}", c.content),
         }
     }
 }
@@ -419,6 +466,11 @@ impl YamlNode {
     /// ```
     pub fn is_modified(&self) -> bool {
         self.metadata.modified
+    }
+
+    /// Returns true if this node is a comment.
+    pub fn is_comment(&self) -> bool {
+        self.value.is_comment()
     }
 }
 
