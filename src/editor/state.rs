@@ -300,6 +300,7 @@ impl EditorState {
         let initial_snapshot = super::undo::EditorSnapshot {
             tree: tree.clone(),
             cursor_path: cursor.path().to_vec(),
+            expanded_paths: tree_view.expanded_paths().clone(),
         };
         let undo_tree = super::undo::UndoTree::new(initial_snapshot, undo_limit);
 
@@ -497,6 +498,7 @@ impl EditorState {
         let initial_snapshot = super::undo::EditorSnapshot {
             tree: self.tree.clone(),
             cursor_path: self.cursor.path().to_vec(),
+            expanded_paths: self.tree_view.expanded_paths().clone(),
         };
         self.undo_tree = super::undo::UndoTree::new(initial_snapshot, 50);
 
@@ -2234,15 +2236,14 @@ impl EditorState {
             return Err(anyhow!("Nothing to paste"));
         }
 
-        // Create undo checkpoint
-        self.checkpoint();
-
         // Paste each node
         for (node, key) in content.nodes.iter().zip(content.keys.iter()) {
             self.paste_single_node(node.clone(), key.clone(), true)?;
         }
 
         self.mark_dirty();
+        // Create undo checkpoint AFTER mutation so undo restores pre-paste state
+        self.checkpoint();
         Ok(())
     }
 
@@ -2268,13 +2269,13 @@ impl EditorState {
             return Err(anyhow!("Nothing to paste"));
         }
 
-        self.checkpoint();
-
         for (node, key) in content.nodes.iter().zip(content.keys.iter()) {
             self.paste_single_node(node.clone(), key.clone(), false)?;
         }
 
         self.mark_dirty();
+        // Create undo checkpoint AFTER mutation so undo restores pre-paste state
+        self.checkpoint();
         Ok(())
     }
 
@@ -3271,6 +3272,7 @@ impl EditorState {
         let snapshot = super::undo::EditorSnapshot {
             tree: self.tree.clone(),
             cursor_path: self.cursor.path().to_vec(),
+            expanded_paths: self.tree_view.expanded_paths().clone(),
         };
         self.undo_tree.add_checkpoint(snapshot);
     }
@@ -3282,8 +3284,15 @@ impl EditorState {
     /// false if already at the root state.
     pub fn undo(&mut self) -> bool {
         if let Some(snapshot) = self.undo_tree.undo() {
+            let current_cursor = self.cursor.path().to_vec();
             self.tree = snapshot.tree;
-            self.cursor.set_path(snapshot.cursor_path);
+            self.tree_view.set_expanded_paths(snapshot.expanded_paths);
+
+            // Only restore cursor if current position is now invalid
+            if self.tree.get_node(&current_cursor).is_none() {
+                self.cursor.set_path(snapshot.cursor_path);
+            }
+
             self.rebuild_tree_view();
             true
         } else {
@@ -3298,8 +3307,15 @@ impl EditorState {
     /// if redo succeeded, false if no redo history exists.
     pub fn redo(&mut self) -> bool {
         if let Some(snapshot) = self.undo_tree.redo() {
+            let current_cursor = self.cursor.path().to_vec();
             self.tree = snapshot.tree;
-            self.cursor.set_path(snapshot.cursor_path);
+            self.tree_view.set_expanded_paths(snapshot.expanded_paths);
+
+            // Only restore cursor if current position is now invalid
+            if self.tree.get_node(&current_cursor).is_none() {
+                self.cursor.set_path(snapshot.cursor_path);
+            }
+
             self.rebuild_tree_view();
             true
         } else {

@@ -116,6 +116,16 @@ impl TreeViewState {
         &self.lines
     }
 
+    /// Returns a reference to the set of expanded paths.
+    pub fn expanded_paths(&self) -> &HashSet<Vec<usize>> {
+        &self.expanded_paths
+    }
+
+    /// Sets the expanded paths to the given set.
+    pub fn set_expanded_paths(&mut self, expanded_paths: HashSet<Vec<usize>>) {
+        self.expanded_paths = expanded_paths;
+    }
+
     /// Toggles the expand/collapse state of a node at the given path.
     ///
     /// After toggling, call `rebuild()` to regenerate the visible lines.
