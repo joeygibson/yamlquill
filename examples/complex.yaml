@@ -45,7 +45,7 @@ services:
     health: *default_health              # alias reuse
     env:
       - name: RATE_LIMIT_RPS
-        value: "2000"                    # quoted: would be integer without
+        value: "2000"
       - name: JWT_SECRET
         valueFrom:
           secretKeyRef:
@@ -59,7 +59,7 @@ services:
       - path: /api/v1/health
         backend: fleet-controller
         auth_required: false
-        rate_limit: null                 # unlimited
+        rate_limit: null          # unlimited
 
   - name: fleet-controller
     replicas: 5
@@ -75,7 +75,7 @@ services:
     health: *default_health
     env:
       - name: CACHE_TTL_SECONDS
-        value: "300"                     # quoted: would be integer without
+        value: "300"
       - name: DB_URL
         valueFrom:
           secretKeyRef:
@@ -101,7 +101,7 @@ services:
       requests: *default_limits
       limits: *default_limits
     health:
-      <<: *default_health                # merge key: override one field
+      <<: *default_health              # merge key: override one field
       interval_seconds: 60
     subscriptions:
       - topic: fleet.events.create
@@ -179,7 +179,7 @@ observability:
       condition: 'rate(errors_total[5m]) > 0.05'
       severity: critical
       notify:
-        - channel: "#incidents"          # quoted: # starts a comment
+        - channel: "#incidents"
           platform: slack
         - channel: oncall@fleet.internal
           platform: email
@@ -188,7 +188,7 @@ observability:
       condition: 'unhealthy_replicas > 0'
       severity: warning
       notify:
-        - channel: "#fleet-alerts"       # quoted: # starts a comment
+        - channel: "#fleet-alerts"
           platform: slack
 
 # --- Null, Boolean, and Numeric Edge Cases -------------------
@@ -210,7 +210,7 @@ ci_pipeline:
   - step: test
     uses: actions/setup-go@v5
     matrix:
-      go_version: ["1.21", "1.22", "1.23"]  # quoted: would be floats without
+      go_version: ["1.21", "1.22", "1.23"]
     run: |
       go mod download
       go test -race -coverprofile=coverage.out ./...
