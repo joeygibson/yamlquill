@@ -275,8 +275,8 @@ impl YamlTree {
         let mut current = &mut self.root;
 
         for &index in path {
-            // We need to reborrow current to avoid the temporary lifetime issue
-            current = match current.value_mut() {
+            // Use value_mut_traverse to avoid marking parent containers as modified
+            current = match current.value_mut_traverse() {
                 YamlValue::Object(entries) => {
                     let (_key, value) = entries.get_index_mut(index)?;
                     value

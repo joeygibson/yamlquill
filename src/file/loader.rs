@@ -48,7 +48,7 @@ pub fn load_yaml_file<P: AsRef<Path>>(path: P) -> Result<YamlTree> {
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
 
     let node = parse_yaml_auto(&contents)?;
-    Ok(YamlTree::new(node))
+    Ok(YamlTree::with_source(node, Some(contents)))
 }
 
 /// Loads and parses a YAML file with automatic gzip decompression.
@@ -109,7 +109,7 @@ pub fn load_yaml_file_auto<P: AsRef<Path>>(path: P) -> Result<YamlTree> {
     };
 
     let node = parse_yaml_auto(&contents)?;
-    Ok(YamlTree::new(node))
+    Ok(YamlTree::with_source(node, Some(contents)))
 }
 
 /// Helper function to parse multi-document YAML content (newline-delimited JSON).

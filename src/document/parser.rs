@@ -34,17 +34,17 @@ use yaml_rust2::scanner::{Scanner, TokenType};
 /// Comments are extracted by scanning the raw YAML text before parsing.
 /// Each comment tracks its content, line number, and column for positioning.
 #[derive(Debug, Clone, PartialEq)]
-struct ExtractedComment {
+pub(crate) struct ExtractedComment {
     /// Comment text without the '#' prefix
-    content: String,
+    pub(crate) content: String,
     /// Line number (1-indexed)
-    line: usize,
+    pub(crate) line: usize,
     /// Column where comment starts (0-indexed)
-    col: usize,
+    pub(crate) col: usize,
     /// Indentation level (number of leading spaces)
-    indent: usize,
+    pub(crate) indent: usize,
     /// True if this comment is on same line as YAML content
-    is_inline: bool,
+    pub(crate) is_inline: bool,
 }
 
 /// Maps anchor/alias names extracted from Scanner to their positions.
@@ -104,7 +104,7 @@ impl AnchorMap {
 /// // comments[0]: Above comment on line 2
 /// // comments[1]: Inline comment on line 3
 /// ```
-fn scan_for_comments(yaml_str: &str) -> Vec<ExtractedComment> {
+pub(crate) fn scan_for_comments(yaml_str: &str) -> Vec<ExtractedComment> {
     let mut comments = Vec::new();
 
     for (line_idx, line) in yaml_str.lines().enumerate() {
@@ -581,75 +581,281 @@ fn determine_comment_position(
     }
 }
 
-/// Inject comments into a node recursively.
+/// Determines which container each comment belongs to by analyzing YAML indentation.
 ///
-/// This function inserts Comment nodes into the tree structure.
-/// Comments are injected into all containers (to match test expectations),
-/// but this is a known limitation - proper association requires text spans.
+/// For each comment, computes a key-name path identifying the container in the tree
+/// where the comment should be injected. An empty path means the comment belongs at
+/// the document root. Uses indentation to determine nesting depth and the last-seen
+/// key at each level to determine container ownership.
+fn compute_comment_containers(
+    yaml_lines: &[&str],
+    comments: &[ExtractedComment],
+) -> Vec<Vec<String>> {
+    // Build scope stack by scanning YAML lines.
+    // Each entry: (indent_level, key_name)
+    let mut stack: Vec<(usize, String)> = vec![];
+    // Store a snapshot of the stack for each line
+    let mut stack_snapshots: Vec<Vec<(usize, String)>> = vec![];
+
+    for line in yaml_lines.iter() {
+        let trimmed = line.trim();
+        let indent = line.chars().take_while(|&c| c == ' ').count();
+
+        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+            // Handle array item lines: strip "- " prefix
+            let (effective_trimmed, effective_indent) =
+                if let Some(stripped) = trimmed.strip_prefix("- ") {
+                    (stripped, indent + 2)
+                } else {
+                    (trimmed, indent)
+                };
+
+            // Skip flow mappings, sequences, and bare array items
+            if !effective_trimmed.starts_with('{')
+                && !effective_trimmed.starts_with('[')
+                && !effective_trimmed.starts_with('-')
+            {
+                // Look for key: pattern
+                if let Some(colon_pos) = effective_trimmed.find(':') {
+                    if colon_pos > 0 {
+                        let key = effective_trimmed[..colon_pos].trim();
+                        // Skip quoted keys
+                        if !key.starts_with('"') && !key.starts_with('\'') {
+                            while stack.last().is_some_and(|(i, _)| *i >= effective_indent) {
+                                stack.pop();
+                            }
+                            stack.push((effective_indent, key.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
+        stack_snapshots.push(stack.clone());
+    }
+
+    // For each comment, determine its container path
+    comments
+        .iter()
+        .map(|comment| {
+            let line_idx = comment.line - 1;
+            if line_idx >= stack_snapshots.len() {
+                return vec![];
+            }
+
+            let snapshot = &stack_snapshots[line_idx];
+
+            // Container is all scope entries with indent strictly less than comment's indent
+            snapshot
+                .iter()
+                .filter(|(indent, _)| *indent < comment.indent)
+                .map(|(_, key)| key.clone())
+                .collect()
+        })
+        .collect()
+}
+
+/// Finds the line number (0-indexed) where a key is defined in the YAML source.
+/// Searches forward from `search_from` for a line starting with `key_name:`.
+fn find_key_line_in_yaml(key_name: &str, yaml_lines: &[&str], search_from: usize) -> Option<usize> {
+    for (line_idx, line) in yaml_lines.iter().enumerate().skip(search_from) {
+        let trimmed = line.trim();
+        // Handle "- key:" format for array items
+        let check = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+        // Check if line defines this key
+        if let Some(rest) = check.strip_prefix(key_name) {
+            if rest.starts_with(':') {
+                return Some(line_idx);
+            }
+        }
+    }
+    None
+}
+
+/// Creates a comment YamlNode from an ExtractedComment.
+fn make_comment_node(
+    comment: &ExtractedComment,
+    yaml_lines: &[&str],
+    comment_counter: &mut usize,
+) -> (String, YamlNode) {
+    let line_idx = comment.line - 1;
+    let position = determine_comment_position(yaml_lines, line_idx, comment.is_inline);
+    let comment_node = YamlNode::new(YamlValue::Comment(CommentNode::from_source(
+        comment.content.trim().to_string(),
+        position,
+        comment.line,
+    )));
+    let key = format!("__comment_{}__", *comment_counter);
+    *comment_counter += 1;
+    (key, comment_node)
+}
+
+/// Inject comments into the tree based on their computed container paths.
 ///
-/// FIXME: This injects ALL comments into ALL containers, causing duplication.
-/// Proper fix requires tracking which comments belong to which container
-/// based on line numbers and indentation/nesting level.
-fn inject_comments_recursive(
+/// Walks the tree and at each container, injects only the comments whose
+/// computed container path matches the current position. Comments are
+/// interleaved with keys based on their line positions in the original YAML
+/// source so they appear at the correct location rather than at the end.
+fn inject_comments_by_path(
     mut node: YamlNode,
     comments: &[ExtractedComment],
+    container_paths: &[Vec<String>],
     comment_counter: &mut usize,
     yaml_lines: &[&str],
+    current_path: &[String],
 ) -> YamlNode {
     match &mut node.value {
         YamlValue::Object(map) => {
-            // Recursively inject into child nodes
-            let mut new_map = IndexMap::new();
+            // 1. Recurse into children
+            let mut processed_entries: Vec<(String, YamlNode)> = Vec::new();
             for (key, child) in map.drain(..) {
-                let processed_child =
-                    inject_comments_recursive(child, comments, comment_counter, yaml_lines);
-                new_map.insert(key, processed_child);
+                let mut child_path = current_path.to_vec();
+                child_path.push(key.clone());
+                let processed = inject_comments_by_path(
+                    child,
+                    comments,
+                    container_paths,
+                    comment_counter,
+                    yaml_lines,
+                    &child_path,
+                );
+                processed_entries.push((key, processed));
             }
 
-            // Add comments at this level
-            for comment in comments {
-                let line_idx = comment.line - 1;
-                let position = determine_comment_position(yaml_lines, line_idx, comment.is_inline);
+            // 2. Collect comments for this container, sorted by line number
+            let mut my_comments: Vec<&ExtractedComment> = comments
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| container_paths[*idx].as_slice() == current_path)
+                .map(|(_, c)| c)
+                .collect();
+            my_comments.sort_by_key(|c| c.line);
 
-                let comment_node = YamlNode::new(YamlValue::Comment(CommentNode::new(
-                    comment.content.trim().to_string(),
-                    position,
-                )));
+            if my_comments.is_empty() {
+                // No comments - just build the map from entries
+                node.value = YamlValue::Object(processed_entries.into_iter().collect());
+            } else {
+                // 3. Find line numbers for each key in the YAML source
+                let mut key_lines: Vec<usize> = Vec::new();
+                let mut search_from = 0;
+                for (key, _) in &processed_entries {
+                    if let Some(line) = find_key_line_in_yaml(key, yaml_lines, search_from) {
+                        key_lines.push(line);
+                        search_from = line + 1;
+                    } else {
+                        // Couldn't find key - use search_from to maintain order
+                        key_lines.push(search_from);
+                    }
+                }
 
-                let key = format!("__comment_{}__", *comment_counter);
-                *comment_counter += 1;
-                new_map.insert(key, comment_node);
+                // 4. Build interleaved map: insert comments before the keys they precede
+                let mut new_map = IndexMap::new();
+                let mut comment_iter = my_comments.iter().peekable();
+
+                for (i, (key, child_node)) in processed_entries.into_iter().enumerate() {
+                    let key_line = key_lines[i];
+                    // Insert all comments whose line comes before this key
+                    while let Some(comment) = comment_iter.peek() {
+                        if comment.line - 1 < key_line {
+                            let (ckey, cnode) =
+                                make_comment_node(comment, yaml_lines, comment_counter);
+                            new_map.insert(ckey, cnode);
+                            comment_iter.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    new_map.insert(key, child_node);
+                }
+
+                // Insert remaining comments after the last key
+                for comment in comment_iter {
+                    let (ckey, cnode) = make_comment_node(comment, yaml_lines, comment_counter);
+                    new_map.insert(ckey, cnode);
+                }
+
+                node.value = YamlValue::Object(new_map);
             }
-
-            node.value = YamlValue::Object(new_map);
         }
         YamlValue::Array(elements) => {
-            // Recursively inject into child elements
-            let mut new_elements = Vec::new();
+            // 1. Recurse into children
+            let mut processed_elements: Vec<YamlNode> = Vec::new();
             for child in elements.drain(..) {
-                let processed_child =
-                    inject_comments_recursive(child, comments, comment_counter, yaml_lines);
-                new_elements.push(processed_child);
+                let processed = inject_comments_by_path(
+                    child,
+                    comments,
+                    container_paths,
+                    comment_counter,
+                    yaml_lines,
+                    current_path,
+                );
+                processed_elements.push(processed);
             }
 
-            // Add comments as array elements
-            for comment in comments {
-                let line_idx = comment.line - 1;
-                let position = determine_comment_position(yaml_lines, line_idx, comment.is_inline);
+            // 2. Collect comments for this container, sorted by line
+            let mut my_comments: Vec<&ExtractedComment> = comments
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| container_paths[*idx].as_slice() == current_path)
+                .map(|(_, c)| c)
+                .collect();
+            my_comments.sort_by_key(|c| c.line);
 
-                let comment_node = YamlNode::new(YamlValue::Comment(CommentNode::new(
-                    comment.content.trim().to_string(),
-                    position,
-                )));
+            if my_comments.is_empty() {
+                node.value = YamlValue::Array(processed_elements);
+            } else {
+                // Find element line numbers by looking for "- " at expected indent
+                let expected_indent = current_path.len() * 2;
+                let mut elem_lines: Vec<usize> = Vec::new();
+                let mut search_from = 0;
+                for _ in 0..processed_elements.len() {
+                    let mut found = false;
+                    for (line_idx, line) in yaml_lines.iter().enumerate().skip(search_from) {
+                        let indent = line.chars().take_while(|&c| c == ' ').count();
+                        if indent == expected_indent {
+                            let trimmed = line.trim();
+                            if trimmed.starts_with("- ") || trimmed == "-" {
+                                elem_lines.push(line_idx);
+                                search_from = line_idx + 1;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !found {
+                        elem_lines.push(search_from);
+                    }
+                }
 
-                new_elements.push(comment_node);
+                // Interleave comments with elements
+                let mut new_elements = Vec::new();
+                let mut comment_iter = my_comments.iter().peekable();
+
+                for (i, elem) in processed_elements.into_iter().enumerate() {
+                    let elem_line = elem_lines.get(i).copied().unwrap_or(usize::MAX);
+                    while let Some(comment) = comment_iter.peek() {
+                        if comment.line - 1 < elem_line {
+                            let (_, cnode) =
+                                make_comment_node(comment, yaml_lines, comment_counter);
+                            new_elements.push(cnode);
+                            comment_iter.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    new_elements.push(elem);
+                }
+
+                // Remaining comments after last element
+                for comment in comment_iter {
+                    let (_, cnode) = make_comment_node(comment, yaml_lines, comment_counter);
+                    new_elements.push(cnode);
+                }
+
+                node.value = YamlValue::Array(new_elements);
             }
-
-            node.value = YamlValue::Array(new_elements);
         }
-        _ => {
-            // Scalar values: no children to process
-        }
+        _ => {}
     }
 
     node
@@ -657,16 +863,29 @@ fn inject_comments_recursive(
 
 /// Inject comments into the root node after parsing completes.
 ///
-/// This function inserts Comment nodes into the tree structure based on
-/// comment positions determined from line numbers and inline status.
+/// Uses indentation analysis to determine which container each comment
+/// belongs to, then injects each comment exactly once into the correct
+/// container in the tree.
 fn inject_comments_into_tree(
     root: YamlNode,
     comments: &[ExtractedComment],
     comment_counter: &mut usize,
     yaml_str: &str,
 ) -> YamlNode {
+    if comments.is_empty() {
+        return root;
+    }
+
     let yaml_lines: Vec<&str> = yaml_str.lines().collect();
-    inject_comments_recursive(root, comments, comment_counter, &yaml_lines)
+    let container_paths = compute_comment_containers(&yaml_lines, comments);
+    inject_comments_by_path(
+        root,
+        comments,
+        &container_paths,
+        comment_counter,
+        &yaml_lines,
+        &[],
+    )
 }
 
 /// Parses YAML with automatic single/multi-document detection.

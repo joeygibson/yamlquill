@@ -127,12 +127,27 @@ pub struct CommentNode {
     pub content: String,
     /// Position of this comment relative to other nodes
     pub position: CommentPosition,
+    /// Original source line number (1-indexed), if this comment was parsed from source
+    pub source_line: Option<usize>,
 }
 
 impl CommentNode {
-    /// Create a new comment node
+    /// Create a new comment node (user-created, no source line)
     pub fn new(content: String, position: CommentPosition) -> Self {
-        Self { content, position }
+        Self {
+            content,
+            position,
+            source_line: None,
+        }
+    }
+
+    /// Create a comment node with a known source line number
+    pub fn from_source(content: String, position: CommentPosition, line: usize) -> Self {
+        Self {
+            content,
+            position,
+            source_line: Some(line),
+        }
     }
 
     /// Get the comment content
@@ -143,6 +158,11 @@ impl CommentNode {
     /// Get the comment position
     pub fn position(&self) -> &CommentPosition {
         &self.position
+    }
+
+    /// Get the original source line number, if available
+    pub fn source_line(&self) -> Option<usize> {
+        self.source_line
     }
 }
 
@@ -448,6 +468,15 @@ impl YamlNode {
     /// ```
     pub fn value_mut(&mut self) -> &mut YamlValue {
         self.metadata.modified = true;
+        &mut self.value
+    }
+
+    /// Returns a mutable reference to the node's value for traversal purposes.
+    ///
+    /// Unlike `value_mut()`, this does NOT mark the node as modified.
+    /// Use this only when you need mutable access to traverse into children
+    /// without implying a change to this node itself.
+    pub(crate) fn value_mut_traverse(&mut self) -> &mut YamlValue {
         &mut self.value
     }
 

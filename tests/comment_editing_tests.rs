@@ -311,16 +311,10 @@ items:
     let tree = YamlTree::new(node);
     let mut state = EditorState::new(tree, "default".to_string());
 
-    // Find the comment node
-    // Navigate down to find it
-    state.move_cursor_down(); // items key
-    state.move_cursor_down(); // items array
-    state.move_cursor_down(); // Should be comment or first array element
-
-    // Keep navigating until we find the comment
+    // Find the comment node by navigating through visible nodes
+    // With correct interleaving, the comment appears before the array elements
     let mut found_comment = false;
-    for _ in 0..5 {
-        // Try up to 5 positions
+    for _ in 0..10 {
         if let Some(current_node) = state.tree().get_node(state.cursor().path()) {
             if matches!(current_node.value(), YamlValue::Comment(_)) {
                 found_comment = true;

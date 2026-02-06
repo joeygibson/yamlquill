@@ -6,6 +6,7 @@ fn test_comment_node_creation() {
     let comment = CommentNode {
         content: "Test comment".to_string(),
         position: CommentPosition::Above,
+        source_line: None,
     };
     assert_eq!(comment.content, "Test comment");
     assert!(matches!(comment.position, CommentPosition::Above));
@@ -16,6 +17,7 @@ fn test_comment_value_variant() {
     let comment_node = CommentNode {
         content: "Line comment".to_string(),
         position: CommentPosition::Line,
+        source_line: None,
     };
     let value = YamlValue::Comment(comment_node);
     assert!(matches!(value, YamlValue::Comment(_)));
@@ -26,6 +28,7 @@ fn test_yaml_node_is_comment() {
     let comment = YamlNode::new(YamlValue::Comment(CommentNode {
         content: "Test".to_string(),
         position: CommentPosition::Standalone,
+        source_line: None,
     }));
     assert!(comment.is_comment());
 

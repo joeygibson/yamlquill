@@ -5,11 +5,137 @@
 
 use crate::config::Config;
 use crate::document::node::{CommentNode, CommentPosition, YamlNode, YamlNumber, YamlValue};
+use crate::document::parser::scan_for_comments;
 use crate::document::tree::YamlTree;
 use anyhow::{Context, Result};
 use serde_yaml::Value;
 use std::fs;
 use std::path::Path;
+
+/// Checks if any non-comment node in the tree has been modified.
+///
+/// Walks the tree depth-first, skipping comment nodes. Returns `true` if any
+/// non-comment leaf node has `is_modified() == true`. Container nodes are not
+/// checked directly because they may be marked modified only due to comment
+/// injection during parsing.
+fn has_non_comment_modifications(node: &YamlNode) -> bool {
+    match node.value() {
+        YamlValue::Comment(_) => false,
+        YamlValue::Object(entries) => entries.values().any(has_non_comment_modifications),
+        YamlValue::Array(elements) => elements.iter().any(has_non_comment_modifications),
+        YamlValue::MultiDoc(docs) => docs.iter().any(has_non_comment_modifications),
+        _ => node.is_modified(),
+    }
+}
+
+/// Collects all comment nodes from the tree with their source line numbers.
+///
+/// Returns `(content, source_line)` pairs. Comments without a source line
+/// (user-added via the editor) return `source_line = None`.
+fn collect_tree_comments_with_lines(node: &YamlNode) -> Vec<(String, Option<usize>)> {
+    let mut comments = Vec::new();
+    collect_tree_comments_recursive(node, &mut comments);
+    comments
+}
+
+fn collect_tree_comments_recursive(node: &YamlNode, comments: &mut Vec<(String, Option<usize>)>) {
+    match node.value() {
+        YamlValue::Comment(c) => {
+            comments.push((c.content().to_string(), c.source_line()));
+        }
+        YamlValue::Object(entries) => {
+            for value in entries.values() {
+                collect_tree_comments_recursive(value, comments);
+            }
+        }
+        YamlValue::Array(elements) => {
+            for elem in elements {
+                collect_tree_comments_recursive(elem, comments);
+            }
+        }
+        YamlValue::MultiDoc(docs) => {
+            for doc in docs {
+                collect_tree_comments_recursive(doc, comments);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Applies comment edits to the original source text.
+///
+/// Uses source line numbers stored in comment nodes to map tree comments
+/// directly back to their original source lines. This approach is robust
+/// against comment count mismatches caused by the injection system
+/// (e.g., alias expansion duplicating inline comments).
+///
+/// Returns `None` if any comment was added by the user (no source_line),
+/// signaling the caller to fall back to full serialization.
+fn apply_comment_edits_to_source(original: &str, root: &YamlNode) -> Option<String> {
+    let tree_comments = collect_tree_comments_with_lines(root);
+
+    // If any comment lacks a source_line, it was user-added → fall back
+    if tree_comments.iter().any(|(_, line)| line.is_none()) {
+        return None;
+    }
+
+    // Build a map of source line → original comment content
+    let original_comments = scan_for_comments(original);
+    let mut original_by_line: std::collections::HashMap<usize, &str> =
+        std::collections::HashMap::new();
+    for c in &original_comments {
+        original_by_line.insert(c.line, c.content.trim());
+    }
+
+    let mut lines: Vec<String> = original.lines().map(|l| l.to_string()).collect();
+
+    // For each tree comment with a source_line, check if content changed
+    for (new_content, source_line) in &tree_comments {
+        let src_line = source_line.unwrap(); // safe: checked above
+        if let Some(&orig_content) = original_by_line.get(&src_line) {
+            if orig_content != new_content.as_str() {
+                let line_idx = src_line - 1;
+                if line_idx >= lines.len() {
+                    return None;
+                }
+                let line = &lines[line_idx];
+                if let Some(hash_pos) = find_comment_hash(line) {
+                    let before_hash = &line[..hash_pos];
+                    lines[line_idx] = format!("{}# {}", before_hash, new_content);
+                } else {
+                    return None;
+                }
+            }
+        }
+        // Comments with a source_line but no matching original line
+        // (shouldn't happen, but harmless to ignore)
+    }
+
+    // Preserve trailing newline if original had one
+    let mut result = lines.join("\n");
+    if original.ends_with('\n') {
+        result.push('\n');
+    }
+
+    Some(result)
+}
+
+/// Finds the position of the comment '#' character in a line,
+/// ignoring '#' characters inside quoted strings.
+fn find_comment_hash(line: &str) -> Option<usize> {
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    for (idx, ch) in line.chars().enumerate() {
+        match ch {
+            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            '"' if !in_single_quote => in_double_quote = !in_double_quote,
+            '#' if !in_single_quote && !in_double_quote => return Some(idx),
+            _ => {}
+        }
+    }
+    None
+}
 
 /// Converts a YamlNode tree to a serde_yaml::Value.
 ///
@@ -42,7 +168,7 @@ use std::path::Path;
 /// - Alias nodes return an error (Phase 3 will add support)
 /// - MultiDoc nodes return an error (use save_yamll instead)
 /// - All strings output as plain style (Phase 4 will preserve literal/folded)
-fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
+fn convert_to_serde_value(node: &YamlNode, tree: &YamlTree) -> Result<Value> {
     let value = match node.value() {
         YamlValue::Null => Value::Null,
 
@@ -66,7 +192,11 @@ fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
         }
 
         YamlValue::Array(elements) => {
-            let seq: Result<Vec<Value>> = elements.iter().map(convert_to_serde_value).collect();
+            let seq: Result<Vec<Value>> = elements
+                .iter()
+                .filter(|e| !matches!(e.value(), YamlValue::Comment(_)))
+                .map(|e| convert_to_serde_value(e, tree))
+                .collect();
             Value::Sequence(seq?)
         }
 
@@ -77,13 +207,23 @@ fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
                 if key.starts_with("__comment_") {
                     continue;
                 }
-                map.insert(Value::String(key.clone()), convert_to_serde_value(value)?);
+                map.insert(
+                    Value::String(key.clone()),
+                    convert_to_serde_value(value, tree)?,
+                );
             }
             Value::Mapping(map)
         }
 
         YamlValue::Alias(name) => {
-            anyhow::bail!("Cannot serialize Alias nodes in v1 (alias: *{})", name)
+            // Resolve alias to anchor's value
+            if let Some(anchor_path) = tree.anchor_registry().get_anchor_path(name) {
+                if let Some(anchor_node) = tree.get_node(anchor_path) {
+                    return convert_to_serde_value(anchor_node, tree);
+                }
+            }
+            // Fallback: output alias name as a string
+            Value::String(format!("*{}", name))
         }
 
         YamlValue::MultiDoc(_) => {
@@ -100,209 +240,282 @@ fn convert_to_serde_value(node: &YamlNode) -> Result<Value> {
     Ok(value)
 }
 
-/// Information about a comment and its location in the tree
-#[derive(Debug, Clone)]
-struct CommentInfo {
-    /// The comment node
-    comment: CommentNode,
-    /// The key this comment is associated with (for Above/Line comments)
-    associated_key: Option<String>,
+/// Injects comments from the tree into serialized YAML by walking both structures
+/// in parallel. Since serde_yaml preserves IndexMap key order, each key in the
+/// tree corresponds to the next matching key line in the output.
+fn inject_comments_structural(yaml: &str, root: &YamlNode, tree: &YamlTree) -> String {
+    let output_lines: Vec<&str> = yaml.lines().collect();
+    let mut result: Vec<String> = Vec::new();
+    let mut cursor = 0;
+
+    merge_node(root, tree, &output_lines, &mut cursor, &mut result);
+
+    // Emit any remaining output lines
+    while cursor < output_lines.len() {
+        result.push(output_lines[cursor].to_string());
+        cursor += 1;
+    }
+
+    result.join("\n")
 }
 
-/// Collects all comments from a YAML tree
-fn collect_comments(node: &YamlNode) -> Vec<CommentInfo> {
-    let mut comments = Vec::new();
-
+/// Walks a tree node and the serialized output in parallel, emitting output
+/// lines and inserting comments at their correct positions.
+fn merge_node(
+    node: &YamlNode,
+    tree: &YamlTree,
+    lines: &[&str],
+    cursor: &mut usize,
+    result: &mut Vec<String>,
+) {
     match node.value() {
         YamlValue::Object(entries) => {
-            // Collect comments from this object
             for (key, value) in entries {
                 if key.starts_with("__comment_") {
                     if let YamlValue::Comment(comment) = value.value() {
-                        // Try to find the associated key for Above/Line comments
-                        let associated_key = find_associated_key(entries, key, comment);
-                        comments.push(CommentInfo {
-                            comment: comment.clone(),
-                            associated_key,
-                        });
+                        emit_comment(comment, lines, cursor, result);
                     }
-                } else {
-                    // Recursively collect from nested structures
-                    comments.extend(collect_comments(value));
+                    continue;
+                }
+
+                // Advance output to the line for this key, emitting along the way
+                advance_to_key(key, lines, cursor, result);
+
+                // Recurse into container values
+                match value.value() {
+                    YamlValue::Object(_) | YamlValue::Array(_) => {
+                        merge_node(value, tree, lines, cursor, result);
+                    }
+                    YamlValue::Alias(name) => {
+                        // Alias was resolved during serialization - skip its expanded content
+                        if let Some(anchor_path) = tree.anchor_registry().get_anchor_path(name) {
+                            if let Some(anchor_node) = tree.get_node(anchor_path) {
+                                if anchor_node.value().is_container() {
+                                    skip_value_block(lines, cursor, result);
+                                }
+                            }
+                        }
+                    }
+                    _ => {} // scalar on the key line already
                 }
             }
         }
         YamlValue::Array(elements) => {
-            for element in elements.iter() {
-                comments.extend(collect_comments(element));
-            }
-        }
-        YamlValue::MultiDoc(docs) => {
-            for doc in docs.iter() {
-                comments.extend(collect_comments(doc));
+            for elem in elements {
+                if let YamlValue::Comment(comment) = elem.value() {
+                    emit_comment(comment, lines, cursor, result);
+                    continue;
+                }
+
+                // Advance to next "- " array item line
+                advance_to_array_item(lines, cursor, result);
+
+                // For object elements, the first key is on the "- " line
+                match elem.value() {
+                    YamlValue::Object(entries) => {
+                        merge_object_in_array(entries, tree, lines, cursor, result);
+                    }
+                    YamlValue::Array(_) => {
+                        merge_node(elem, tree, lines, cursor, result);
+                    }
+                    YamlValue::Alias(name) => {
+                        if let Some(anchor_path) = tree.anchor_registry().get_anchor_path(name) {
+                            if let Some(anchor_node) = tree.get_node(anchor_path) {
+                                if anchor_node.value().is_container() {
+                                    skip_value_block(lines, cursor, result);
+                                }
+                            }
+                        }
+                    }
+                    _ => {} // scalar array element on the "- " line
+                }
             }
         }
         _ => {}
     }
-
-    comments
 }
 
-/// Find the key associated with a comment in an object.
-///
-/// Uses a heuristic: looks for key names mentioned in the comment content.
-/// This is not perfect but works for common cases like "# Comment above name".
-///
-/// To avoid false positives (e.g., "rename" matching "name"), checks for
-/// word boundaries around the key name.
-fn find_associated_key(
+/// Handles an object that is an element of an array. The first key of such
+/// an object shares the "- " line (e.g., `- name: api-gateway`), so we skip
+/// finding it in the output and only process its value + remaining keys.
+fn merge_object_in_array(
     entries: &indexmap::IndexMap<String, YamlNode>,
-    _comment_key: &str,
-    comment: &CommentNode,
-) -> Option<String> {
-    match comment.position() {
-        CommentPosition::Above | CommentPosition::Line => {
-            // Heuristic: look for key names mentioned in the comment
-            let content_lower = comment.content().to_lowercase();
+    tree: &YamlTree,
+    lines: &[&str],
+    cursor: &mut usize,
+    result: &mut Vec<String>,
+) {
+    let mut skipped_first_key = false;
 
-            for (key, _) in entries {
-                if !key.starts_with("__comment_") {
-                    let key_lower = key.to_lowercase();
-                    // Check if this key name appears in the comment with word boundaries
-                    // to avoid false positives like "rename" matching "name"
-                    if is_word_in_text(&key_lower, &content_lower) {
-                        return Some(key.clone());
+    for (key, value) in entries {
+        if key.starts_with("__comment_") {
+            if let YamlValue::Comment(comment) = value.value() {
+                emit_comment(comment, lines, cursor, result);
+            }
+            continue;
+        }
+
+        if !skipped_first_key {
+            skipped_first_key = true;
+            // First key was already on the "- " line; just recurse into its value
+            match value.value() {
+                YamlValue::Object(_) | YamlValue::Array(_) => {
+                    merge_node(value, tree, lines, cursor, result);
+                }
+                YamlValue::Alias(name) => {
+                    if let Some(anchor_path) = tree.anchor_registry().get_anchor_path(name) {
+                        if let Some(anchor_node) = tree.get_node(anchor_path) {
+                            if anchor_node.value().is_container() {
+                                skip_value_block(lines, cursor, result);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        // Subsequent keys
+        advance_to_key(key, lines, cursor, result);
+        match value.value() {
+            YamlValue::Object(_) | YamlValue::Array(_) => {
+                merge_node(value, tree, lines, cursor, result);
+            }
+            YamlValue::Alias(name) => {
+                if let Some(anchor_path) = tree.anchor_registry().get_anchor_path(name) {
+                    if let Some(anchor_node) = tree.get_node(anchor_path) {
+                        if anchor_node.value().is_container() {
+                            skip_value_block(lines, cursor, result);
+                        }
                     }
                 }
             }
-
-            // Fallback: use the first non-comment key
-            // This handles cases where the key isn't mentioned in the comment
-            for (key, _) in entries {
-                if !key.starts_with("__comment_") {
-                    return Some(key.clone());
-                }
-            }
-
-            None
+            _ => {}
         }
-        CommentPosition::Below | CommentPosition::Standalone => None,
     }
 }
 
-/// Checks if a word appears in text with word boundaries.
-///
-/// Returns true only if the word is surrounded by non-word characters
-/// or string boundaries, preventing false matches like "rename" matching "name".
-///
-/// Word characters are: alphanumeric and underscore.
-fn is_word_in_text(word: &str, text: &str) -> bool {
-    // If word is empty, don't match
-    if word.is_empty() {
-        return false;
-    }
-
-    // Use regex-like word boundary matching
-    let word_bytes = word.as_bytes();
-    let text_bytes = text.as_bytes();
-
-    for i in 0..=(text.len().saturating_sub(word.len())) {
-        // Check if we have a match at position i
-        if &text_bytes[i..i + word.len()] == word_bytes {
-            // Check left boundary: must be start of string or non-word character
-            let left_ok = i == 0 || {
-                let c = text.as_bytes()[i - 1] as char;
-                !c.is_alphanumeric() && c != '_'
+/// Emits a comment into the result at the appropriate position.
+fn emit_comment(comment: &CommentNode, lines: &[&str], cursor: &usize, result: &mut Vec<String>) {
+    match comment.position() {
+        CommentPosition::Above => {
+            let indent = if *cursor < lines.len() {
+                get_line_indent(lines[*cursor])
+            } else if let Some(last) = result.last() {
+                get_line_indent(last)
+            } else {
+                String::new()
             };
-
-            // Check right boundary: must be end of string or non-word character
-            let right_ok = i + word.len() == text.len() || {
-                let c = text.as_bytes()[i + word.len()] as char;
-                !c.is_alphanumeric() && c != '_'
-            };
-
-            if left_ok && right_ok {
-                return true;
+            result.push(format!("{}# {}", indent, comment.content()));
+        }
+        CommentPosition::Line => {
+            // Append to the most recently emitted line
+            if let Some(last) = result.last_mut() {
+                *last = format!("{}  # {}", last, comment.content());
             }
         }
+        CommentPosition::Below => {
+            let indent = if let Some(last) = result.last() {
+                get_line_indent(last)
+            } else {
+                String::new()
+            };
+            result.push(format!("{}# {}", indent, comment.content()));
+        }
+        CommentPosition::Standalone => {
+            if !result.is_empty() && !result.last().unwrap().is_empty() {
+                result.push(String::new());
+            }
+            let indent = if *cursor < lines.len() {
+                get_line_indent(lines[*cursor])
+            } else {
+                String::new()
+            };
+            result.push(format!("{}# {}", indent, comment.content()));
+        }
     }
+}
 
+/// Advances the output cursor to the line that defines `key`, emitting
+/// all intermediate lines (which belong to previous keys' values).
+fn advance_to_key(key: &str, lines: &[&str], cursor: &mut usize, result: &mut Vec<String>) {
+    while *cursor < lines.len() {
+        let line = lines[*cursor];
+        let trimmed = line.trim_start();
+
+        if is_key_match(trimmed, key) {
+            result.push(line.to_string());
+            *cursor += 1;
+            return;
+        }
+
+        // Not our key - part of previous value
+        result.push(line.to_string());
+        *cursor += 1;
+    }
+}
+
+/// Checks if a trimmed line defines the given key.
+fn is_key_match(trimmed: &str, key: &str) -> bool {
+    // Plain key: "key:"
+    if let Some(rest) = trimmed.strip_prefix(key) {
+        if rest.starts_with(':') {
+            return true;
+        }
+    }
+    // Single-quoted key: "'key':"
+    let sq = format!("'{}'", key);
+    if let Some(rest) = trimmed.strip_prefix(&sq) {
+        if rest.starts_with(':') {
+            return true;
+        }
+    }
+    // Double-quoted key: "\"key\":"
+    let dq = format!("\"{}\"", key);
+    if let Some(rest) = trimmed.strip_prefix(&dq) {
+        if rest.starts_with(':') {
+            return true;
+        }
+    }
     false
 }
 
-/// Injects comments into a YAML string
-fn inject_comments(yaml: String, comments: &[CommentInfo]) -> Result<String> {
-    if comments.is_empty() {
-        return Ok(yaml);
-    }
-
-    let mut lines: Vec<String> = yaml.lines().map(|s| s.to_string()).collect();
-
-    // Process comments in reverse order to maintain line positions
-    for comment_info in comments.iter().rev() {
-        match comment_info.comment.position() {
-            CommentPosition::Above => {
-                if let Some(ref key) = comment_info.associated_key {
-                    // Find the line containing the key
-                    if let Some(line_idx) = find_key_line(&lines, key) {
-                        // Insert comment before the key line
-                        let indent = get_line_indent(&lines[line_idx]);
-                        let comment_line =
-                            format!("{}# {}", indent, comment_info.comment.content());
-                        lines.insert(line_idx, comment_line);
-                    }
-                }
-            }
-            CommentPosition::Line => {
-                if let Some(ref key) = comment_info.associated_key {
-                    // Find the line containing the key
-                    if let Some(line_idx) = find_key_line(&lines, key) {
-                        // Append comment to the end of the line
-                        lines[line_idx] =
-                            format!("{}  # {}", lines[line_idx], comment_info.comment.content());
-                    }
-                }
-            }
-            CommentPosition::Below => {
-                // For now, add after the last line
-                // TODO: Implement proper below positioning
-                lines.push(format!("# {}", comment_info.comment.content()));
-            }
-            CommentPosition::Standalone => {
-                // Add as a standalone line with blank lines around it
-                // TODO: Implement proper standalone positioning
-                if !lines.is_empty() && !lines.last().unwrap().is_empty() {
-                    lines.push(String::new());
-                }
-                lines.push(format!("# {}", comment_info.comment.content()));
-                lines.push(String::new());
-            }
-        }
-    }
-
-    Ok(lines.join("\n"))
-}
-
-/// Finds the line number containing a specific key
-fn find_key_line(lines: &[String], key: &str) -> Option<usize> {
-    for (i, line) in lines.iter().enumerate() {
-        // Match "key:" or "key :" patterns
+/// Advances the output cursor to the next array item line ("- "),
+/// emitting all intermediate lines.
+fn advance_to_array_item(lines: &[&str], cursor: &mut usize, result: &mut Vec<String>) {
+    while *cursor < lines.len() {
+        let line = lines[*cursor];
         let trimmed = line.trim_start();
-        if let Some(after_key) = trimmed.strip_prefix(key) {
-            // Key must be followed by colon (with optional space before it)
-            // Exact match: "key:" or "key :" but not "namespace:"
-            if after_key.starts_with(':') {
-                return Some(i);
-            }
-            if after_key.starts_with(' ') && after_key.trim_start().starts_with(':') {
-                return Some(i);
-            }
+        if trimmed.starts_with("- ") || trimmed == "-" {
+            result.push(line.to_string());
+            *cursor += 1;
+            return;
         }
+        result.push(line.to_string());
+        *cursor += 1;
     }
-    None
 }
 
-/// Gets the indentation of a line
+/// Skips past an indented block in the output (for resolved alias content).
+/// Emits all lines that are at or deeper than the current indent level.
+fn skip_value_block(lines: &[&str], cursor: &mut usize, result: &mut Vec<String>) {
+    if *cursor >= lines.len() {
+        return;
+    }
+    let base_indent = lines[*cursor].chars().take_while(|c| *c == ' ').count();
+    while *cursor < lines.len() {
+        let line = lines[*cursor];
+        let indent = line.chars().take_while(|c| *c == ' ').count();
+        if !line.trim().is_empty() && indent < base_indent {
+            break;
+        }
+        result.push(line.to_string());
+        *cursor += 1;
+    }
+}
+
+/// Gets the indentation of a line as a string of whitespace.
 fn get_line_indent(line: &str) -> String {
     line.chars()
         .take_while(|c| c.is_whitespace())
@@ -389,17 +602,24 @@ pub fn save_yaml_file<P: AsRef<Path>>(path: P, tree: &YamlTree, config: &Config)
         create_backup(path)?;
     }
 
-    // Collect comments from the tree
-    let comments = collect_comments(tree.root());
+    // Fast path: if only comments were edited, patch the original source directly
+    if let Some(original) = tree.original_source() {
+        if !has_non_comment_modifications(tree.root()) {
+            if let Some(updated) = apply_comment_edits_to_source(original, tree.root()) {
+                write_file_atomic(path, updated.as_bytes(), should_compress)?;
+                return Ok(());
+            }
+        }
+    }
 
-    // Convert YamlNode to serde_yaml::Value (comments are skipped)
-    let value = convert_to_serde_value(tree.root())?;
+    // Convert YamlNode to serde_yaml::Value (comments are skipped, aliases resolved)
+    let value = convert_to_serde_value(tree.root(), tree)?;
 
     // Serialize to YAML string
     let yaml_str = serde_yaml::to_string(&value).context("Failed to serialize YAML")?;
 
-    // Inject comments back into the YAML string
-    let yaml_with_comments = inject_comments(yaml_str, &comments)?;
+    // Merge comments from the tree back into the serialized output
+    let yaml_with_comments = inject_comments_structural(&yaml_str, tree.root(), tree);
 
     // Write atomically (compressed or uncompressed)
     write_file_atomic(path, yaml_with_comments.as_bytes(), should_compress)?;
@@ -476,7 +696,7 @@ fn save_yamll<P: AsRef<Path>>(
             output.push_str("---\n");
 
             // Convert to serde_yaml::Value
-            let value = convert_to_serde_value(node)
+            let value = convert_to_serde_value(node, tree)
                 .with_context(|| format!("Failed to convert document {} to YAML", i + 1))?;
 
             // Serialize to YAML with proper formatting
@@ -650,7 +870,7 @@ pub fn serialize_node_compact(node: &YamlNode) -> String {
         }
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
-        YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
+        YamlValue::Alias(name) => format!("*{}", name),
         YamlValue::Comment(c) => format!("\"# {}\"", escape_yaml_string(&c.content)),
     }
 }
@@ -739,7 +959,7 @@ pub fn serialize_node_jq_style(
         },
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
-        YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
+        YamlValue::Alias(name) => format!("*{}", name),
         YamlValue::Comment(c) => format!("\"# {}\"", escape_yaml_string(&c.content)),
     }
 }
@@ -838,7 +1058,7 @@ pub fn serialize_node(node: &YamlNode, indent_size: usize, current_depth: usize)
         }
         YamlValue::Boolean(b) => b.to_string(),
         YamlValue::Null => "null".to_string(),
-        YamlValue::Alias(_) => panic!("Cannot serialize Alias in v1"),
+        YamlValue::Alias(name) => format!("*{}", name),
         YamlValue::Comment(c) => format!("\"# {}\"", escape_yaml_string(&c.content)),
     }
 }
@@ -1540,61 +1760,400 @@ mod tests {
         assert_eq!(parsed2["version"], 2);
     }
 
-    // Task 5: Bug fix tests for find_key_line() and find_associated_key()
+    // Task 5: Tests for structural comment injection
 
     #[test]
-    fn test_find_key_line_exact_match_not_prefix() {
-        // Bug fix: ensure "name" doesn't match "namespace:" prefix
-        // find_key_line is private, so we test the inject_comments behavior
-        // that depends on it. This test verifies the fix indirectly.
-
-        // Create a simple YAML with comments
-        let yaml = "namespace: value\nname: Alice\n";
-
-        // Key "name" should find line 1, not line 0 (which has "namespace")
-        // We'll verify this by ensuring comment injection works correctly
-        assert!(yaml.contains("name: Alice"));
-        assert!(yaml.contains("namespace: value"));
+    fn test_is_key_match_exact() {
+        assert!(is_key_match("name:", "name"));
+        assert!(is_key_match("name: Alice", "name"));
+        assert!(!is_key_match("namespace: value", "name"));
+        assert!(!is_key_match("rename: foo", "name"));
     }
 
     #[test]
-    fn test_is_word_in_text_exact_match() {
-        // Test word boundary matching
-        assert!(is_word_in_text("name", "this is about name"));
-        assert!(is_word_in_text("name", "name field here"));
-        assert!(is_word_in_text("name", "the name with field"));
-        assert!(!is_word_in_text("name", "the name_field")); // underscore continues word
+    fn test_is_key_match_quoted() {
+        assert!(is_key_match("'name': Alice", "name"));
+        assert!(is_key_match("\"name\": Alice", "name"));
+    }
+
+    // Format-preserving save tests
+
+    #[test]
+    fn test_has_non_comment_modifications_all_unmodified() {
+        use crate::document::parser::parse_yaml_auto;
+
+        let yaml = "# top comment\nname: Alice\nage: 30\n";
+        let node = parse_yaml_auto(yaml).unwrap();
+        // parse_yaml_auto creates nodes with modified=false (except comments)
+        assert!(!has_non_comment_modifications(&node));
     }
 
     #[test]
-    fn test_is_word_in_text_no_false_positives() {
-        // Bug fix: ensure "name" doesn't match in "rename"
-        assert!(!is_word_in_text("name", "rename the field"));
-        assert!(!is_word_in_text("name", "username is required"));
-        assert!(!is_word_in_text("name", "first_name_field"));
+    fn test_has_non_comment_modifications_with_edit() {
+        use crate::document::parser::parse_yaml_auto;
+
+        let yaml = "name: Alice\nage: 30\n";
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify a value
+        if let YamlValue::Object(ref mut entries) = node.value {
+            entries.get_index_mut(0).unwrap().1.value_mut();
+        }
+        assert!(has_non_comment_modifications(&node));
     }
 
     #[test]
-    fn test_is_word_in_text_case_sensitive() {
-        // Word boundary matching should be case-sensitive (for words)
-        // but we test with lowercase as that's how it's called
-        assert!(is_word_in_text("name", "name"));
-        assert!(is_word_in_text("name", "the name"));
-        assert!(is_word_in_text("name", "name."));
-        assert!(!is_word_in_text("name", "name123")); // numbers continue word
+    fn test_collect_tree_comments_with_lines() {
+        use crate::document::parser::parse_yaml_auto;
+
+        let yaml = "# first\nname: Alice\n# second\nage: 30\n";
+        let node = parse_yaml_auto(yaml).unwrap();
+        let comments = collect_tree_comments_with_lines(&node);
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments[0].0, "first");
+        assert_eq!(comments[0].1, Some(1)); // line 1
+        assert_eq!(comments[1].0, "second");
+        assert_eq!(comments[1].1, Some(3)); // line 3
     }
 
     #[test]
-    fn test_is_word_in_text_underscore_handling() {
-        // Underscores are part of word identifiers
-        assert!(is_word_in_text("user_name", "user_name field"));
-        assert!(!is_word_in_text("user_name", "username field"));
-        assert!(!is_word_in_text("name", "user_name field"));
+    fn test_apply_comment_edits_no_changes() {
+        use crate::document::parser::parse_yaml_auto;
+
+        let yaml = "# a comment\nname: Alice\n";
+        let node = parse_yaml_auto(yaml).unwrap();
+
+        let result = apply_comment_edits_to_source(yaml, &node);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), yaml);
     }
 
     #[test]
-    fn test_is_word_in_text_empty_word() {
-        // Empty word should not match anything
-        assert!(!is_word_in_text("", "text with empty word"));
+    fn test_apply_comment_edits_changed_comment() {
+        use crate::document::parser::parse_yaml_auto;
+
+        let yaml = "# old comment\nname: Alice\n";
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Change the comment content in the tree
+        if let YamlValue::Object(ref mut entries) = node.value {
+            for (key, value) in entries.iter_mut() {
+                if key.starts_with("__comment_") {
+                    if let YamlValue::Comment(ref mut c) = value.value {
+                        c.content = "new comment".to_string();
+                    }
+                }
+            }
+        }
+
+        let result = apply_comment_edits_to_source(yaml, &node);
+        assert!(result.is_some());
+        let output = result.unwrap();
+        assert!(output.contains("# new comment"), "Got: {}", output);
+        assert!(output.contains("name: Alice"), "Got: {}", output);
+    }
+
+    #[test]
+    fn test_format_preserving_save_keeps_formatting() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        // YAML with various formatting that serde_yaml would change
+        let yaml = r#"# Config file
+name: "Alice"   # user name
+age: 30
+items:
+  - apple
+  - banana
+"#;
+
+        let node = parse_yaml_auto(yaml).unwrap();
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        // Save without modifying anything
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+        // Should be identical to original since nothing was modified
+        assert_eq!(
+            saved, yaml,
+            "Format-preserving save should produce identical output"
+        );
+    }
+
+    #[test]
+    fn test_format_preserving_save_with_comment_edit() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = "# old header\nname: \"Alice\"\nage: 30\n";
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Edit the comment
+        if let YamlValue::Object(ref mut entries) = node.value {
+            for (key, value) in entries.iter_mut() {
+                if key.starts_with("__comment_") {
+                    if let YamlValue::Comment(ref mut c) = value.value {
+                        c.content = "new header".to_string();
+                    }
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+        assert!(saved.contains("# new header"), "Comment should be updated");
+        assert!(
+            saved.contains("name: \"Alice\""),
+            "Quoted string should be preserved"
+        );
+        assert!(saved.contains("age: 30"), "Other content preserved");
+    }
+
+    #[test]
+    fn test_format_preserving_save_falls_back_on_value_edit() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = "# comment\nname: \"Alice\"\n";
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Edit a non-comment value
+        if let YamlValue::Object(ref mut entries) = node.value {
+            for (key, value) in entries.iter_mut() {
+                if key == "name" {
+                    *value.value_mut() = YamlValue::String(YamlString::Plain("Bob".to_string()));
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+        // Should contain the new value (fell back to serde_yaml)
+        assert!(saved.contains("Bob"), "Modified value should appear");
+    }
+
+    #[test]
+    fn test_find_comment_hash() {
+        assert_eq!(find_comment_hash("# comment"), Some(0));
+        assert_eq!(find_comment_hash("name: Alice  # inline"), Some(13));
+        assert_eq!(find_comment_hash("  # indented"), Some(2));
+        assert_eq!(find_comment_hash("name: 'has # in string'"), None);
+        assert_eq!(find_comment_hash("name: \"has # in string\""), None);
+        assert_eq!(find_comment_hash("no comment here"), None);
+    }
+
+    #[test]
+    fn test_format_preserving_with_anchors_and_aliases() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = r#"# header comment
+defaults:
+  resource_limits: &default_limits
+    cpu: "500m"
+    memory: "512Mi"
+  health_check: &default_health
+    enabled: true
+
+# section comment
+services:
+  - name: api-gateway
+    resources:
+      requests: *default_limits          # alias reuse
+    health: *default_health              # alias reuse
+    routes:
+      - path: "/api/v1/health"
+        rate_limit: null          # unlimited
+
+# trailing comment
+feature_flags:
+  debug: false
+"#;
+
+        let node = parse_yaml_auto(yaml).unwrap();
+
+        // Verify no non-comment modifications
+        assert!(
+            !has_non_comment_modifications(&node),
+            "Freshly parsed tree should have no non-comment modifications"
+        );
+
+        // Verify fast path produces identical output when nothing changed
+        let result = apply_comment_edits_to_source(yaml, &node);
+        assert!(result.is_some(), "Fast path should succeed");
+        assert_eq!(result.unwrap(), yaml, "Output should be identical to input");
+
+        // Verify the fast path works end-to-end via save
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+        assert_eq!(saved, yaml, "Saved file should be identical to original");
+    }
+
+    #[test]
+    fn test_format_preserving_edit_comment_with_anchors() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = r#"# old header
+defaults:
+  limits: &default_limits
+    cpu: "500m"
+services:
+  - name: api
+    resources: *default_limits  # alias reuse
+# footer
+"#;
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Edit the first comment (# old header → # new header)
+        if let YamlValue::Object(ref mut entries) = node.value {
+            for (key, value) in entries.iter_mut() {
+                if key.starts_with("__comment_") {
+                    if let YamlValue::Comment(ref mut c) = value.value {
+                        if c.content == "old header" {
+                            c.content = "new header".to_string();
+                        }
+                    }
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Comment should be updated
+        assert!(saved.contains("# new header"), "Comment should be updated");
+        // All original formatting preserved
+        assert!(
+            saved.contains("&default_limits"),
+            "Anchors should be preserved"
+        );
+        assert!(
+            saved.contains("*default_limits"),
+            "Aliases should be preserved"
+        );
+        assert!(
+            saved.contains("cpu: \"500m\""),
+            "Quoted strings should be preserved"
+        );
+        assert!(
+            saved.contains("# alias reuse"),
+            "Inline comments should be preserved"
+        );
+        assert!(saved.contains("# footer"), "Other comments preserved");
+    }
+
+    #[test]
+    fn test_format_preserving_via_get_node_mut() {
+        use crate::document::node::CommentNode;
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        // Simulate the actual editor flow: load → get_node_mut → edit comment → save
+        let yaml = r#"# old header
+defaults:
+  limits: &default_limits
+    cpu: "500m"
+    memory: "512Mi"
+services:
+  - name: api-gateway
+    resources: *default_limits  # alias reuse
+    timeout_ns: 1.5e9
+# footer
+"#;
+
+        let node = parse_yaml_auto(yaml).unwrap();
+        let mut tree = YamlTree::with_source(node, Some(yaml.to_string()));
+
+        // Find comment index (simulate editor cursor navigation)
+        let comment_index = if let YamlValue::Object(entries) = tree.root().value() {
+            entries
+                .keys()
+                .position(|k| k.starts_with("__comment_"))
+                .unwrap()
+        } else {
+            panic!("Expected object root");
+        };
+
+        // Use get_node_mut like commit_editing does (this used to contaminate parents)
+        let comment_node = tree.get_node_mut(&[comment_index]).unwrap();
+        let old_value = comment_node.value();
+        let source_line = if let YamlValue::Comment(c) = old_value {
+            c.source_line()
+        } else {
+            None
+        };
+
+        // Create new comment preserving source_line (like the fixed commit_editing)
+        let new_comment = if let Some(line) = source_line {
+            CommentNode::from_source("new header".to_string(), CommentPosition::Above, line)
+        } else {
+            CommentNode::new("new header".to_string(), CommentPosition::Above)
+        };
+        *comment_node.value_mut() = YamlValue::Comment(new_comment);
+
+        // Save and verify format preservation
+        let config = Config::default();
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        assert!(saved.contains("# new header"), "Comment should be updated");
+        assert!(
+            saved.contains("&default_limits"),
+            "Anchors should be preserved"
+        );
+        assert!(
+            saved.contains("*default_limits"),
+            "Aliases should be preserved"
+        );
+        assert!(
+            saved.contains("cpu: \"500m\""),
+            "Quoted strings should be preserved"
+        );
+        assert!(
+            saved.contains("memory: \"512Mi\""),
+            "Quoted strings should be preserved"
+        );
+        assert!(
+            saved.contains("# alias reuse"),
+            "Inline comments should be preserved"
+        );
+        assert!(
+            saved.contains("1.5e9"),
+            "Scientific notation should be preserved"
+        );
+        assert!(saved.contains("# footer"), "Other comments preserved");
+
+        // Verify the saved content is character-for-character what we expect
+        let expected = yaml.replace("# old header", "# new header");
+        assert_eq!(saved, expected, "Only the edited comment should change");
     }
 }

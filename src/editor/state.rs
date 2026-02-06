@@ -3001,11 +3001,20 @@ impl EditorState {
                     }
                 }
                 YamlValue::Comment(c) => {
-                    // Update comment content while preserving position
-                    YamlValue::Comment(crate::document::node::CommentNode::new(
-                        buffer_content,
-                        c.position().clone(),
-                    ))
+                    // Update comment content while preserving position and source line
+                    let new_comment = if let Some(line) = c.source_line() {
+                        crate::document::node::CommentNode::from_source(
+                            buffer_content,
+                            c.position().clone(),
+                            line,
+                        )
+                    } else {
+                        crate::document::node::CommentNode::new(
+                            buffer_content,
+                            c.position().clone(),
+                        )
+                    };
+                    YamlValue::Comment(new_comment)
                 }
                 YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_) => {
                     return Err(anyhow!("Cannot edit container types"));
