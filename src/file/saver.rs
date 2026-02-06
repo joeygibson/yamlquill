@@ -8,7 +8,9 @@ use crate::document::node::{CommentNode, CommentPosition, YamlNode, YamlNumber, 
 use crate::document::parser::scan_for_comments;
 use crate::document::tree::YamlTree;
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use serde_yaml::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -135,6 +137,263 @@ fn find_comment_hash(line: &str) -> Option<usize> {
         }
     }
     None
+}
+
+/// Represents a top-level section in the original YAML source.
+///
+/// Each section is a top-level key and all its content lines (including
+/// preceding blank lines and comments that belong to this section).
+struct SectionRange {
+    /// The top-level key name
+    key: String,
+    /// First line of this section (0-indexed), including preceding blank/comment lines
+    start_line: usize,
+    /// Line after last line of this section (0-indexed, exclusive)
+    end_line: usize,
+}
+
+/// Extracts a top-level key name from a line at indent 0.
+///
+/// Handles plain keys (`key:`), single-quoted keys (`'key':`),
+/// and double-quoted keys (`"key":`).
+fn extract_top_level_key(line: &str) -> Option<String> {
+    let trimmed = line.trim_end();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    // Must be at indent 0 (no leading whitespace) - but allow lines starting with "- "
+    // which are top-level array items, not keys
+    if line.starts_with(' ') || line.starts_with('\t') || line.starts_with("- ") {
+        return None;
+    }
+
+    // Double-quoted key: "key":
+    if let Some(stripped) = trimmed.strip_prefix('"') {
+        if let Some(end_quote) = stripped.find('"') {
+            let key = &stripped[..end_quote];
+            let rest = &stripped[end_quote + 1..];
+            if rest.starts_with(':') {
+                return Some(key.to_string());
+            }
+        }
+        return None;
+    }
+
+    // Single-quoted key: 'key':
+    if let Some(stripped) = trimmed.strip_prefix('\'') {
+        if let Some(end_quote) = stripped.find('\'') {
+            let key = &stripped[..end_quote];
+            let rest = &stripped[end_quote + 1..];
+            if rest.starts_with(':') {
+                return Some(key.to_string());
+            }
+        }
+        return None;
+    }
+
+    // Plain key: key:
+    if let Some(colon_pos) = trimmed.find(':') {
+        let key = &trimmed[..colon_pos];
+        // Key must not contain spaces (unless quoted, handled above)
+        if !key.is_empty() && !key.contains(' ') {
+            return Some(key.to_string());
+        }
+    }
+
+    None
+}
+
+/// Scans original YAML source to find line ranges for each top-level key.
+///
+/// Inter-section content (blank lines, standalone comments at indent 0) is
+/// assigned to the FOLLOWING section's `start_line`. Lines before the first
+/// key are the "preamble" and not part of any section.
+fn parse_section_ranges(original: &str) -> Vec<SectionRange> {
+    let lines: Vec<&str> = original.lines().collect();
+    let mut sections = Vec::new();
+    let mut pending_gap_start: Option<usize> = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        if let Some(key) = extract_top_level_key(line) {
+            let start = pending_gap_start.unwrap_or(i);
+            sections.push(SectionRange {
+                key,
+                start_line: start,
+                end_line: 0, // will be filled in
+            });
+            pending_gap_start = None;
+        } else if !sections.is_empty() {
+            let trimmed = line.trim();
+            // Check if this line is inter-section gap content (blank or indent-0 comment)
+            let is_gap = trimmed.is_empty()
+                || (trimmed.starts_with('#') && !line.starts_with(' ') && !line.starts_with('\t'));
+
+            if is_gap && pending_gap_start.is_none() {
+                // Check if remaining lines before next key are all gap lines
+                // If so, this starts a gap belonging to the next section
+                let all_gap = lines[i..]
+                    .iter()
+                    .take_while(|l| extract_top_level_key(l).is_none())
+                    .all(|l| {
+                        let t = l.trim();
+                        t.is_empty()
+                            || (t.starts_with('#') && !l.starts_with(' ') && !l.starts_with('\t'))
+                    });
+                if all_gap {
+                    pending_gap_start = Some(i);
+                }
+            }
+        }
+    }
+
+    // Fill in end_line for each section
+    for i in 0..sections.len() {
+        if i + 1 < sections.len() {
+            sections[i].end_line = sections[i + 1].start_line;
+        } else {
+            sections[i].end_line = lines.len();
+        }
+    }
+
+    sections
+}
+
+/// Re-serializes a single modified top-level key-value pair.
+///
+/// Wraps the key+value in a one-entry mapping, serializes via serde_yaml,
+/// then injects comments using the structural comment injection system.
+fn serialize_section(key: &str, node: &YamlNode, tree: &YamlTree) -> Result<String> {
+    // Build a single-entry wrapper: { key: value }
+    let mut wrapper_map = IndexMap::new();
+    wrapper_map.insert(key.to_string(), node.clone());
+    let wrapper_node = YamlNode::new(YamlValue::Object(wrapper_map));
+
+    // Convert to serde_yaml value
+    let value = convert_to_serde_value(&wrapper_node, tree)?;
+
+    // Serialize
+    let yaml_str = serde_yaml::to_string(&value).context("Failed to serialize section")?;
+
+    // Inject comments
+    let yaml_with_comments = inject_comments_structural(&yaml_str, &wrapper_node, tree);
+
+    // Strip trailing newline to avoid double-newlines when joining sections
+    let result = yaml_with_comments.trim_end_matches('\n').to_string();
+
+    Ok(result)
+}
+
+/// Saves YAML with section-level format preservation.
+///
+/// For root Objects, preserves original source text for unmodified top-level
+/// sections and only re-serializes sections that have been modified. This is
+/// the "medium path" between the fast path (comment-only edits) and the slow
+/// path (full re-serialization).
+///
+/// Returns `None` if the root is not an Object or if preservation cannot be
+/// applied, signaling the caller to fall back to the slow path.
+fn save_with_section_preservation(original: &str, tree: &YamlTree) -> Option<String> {
+    let root_entries = match tree.root().value() {
+        YamlValue::Object(entries) => entries,
+        _ => return None,
+    };
+
+    let lines: Vec<&str> = original.lines().collect();
+    let sections = parse_section_ranges(original);
+
+    // Build lookup from key name to section range
+    let section_map: HashMap<&str, &SectionRange> =
+        sections.iter().map(|s| (s.key.as_str(), s)).collect();
+
+    // Find preamble: lines before the first section
+    let preamble_end = sections.first().map(|s| s.start_line).unwrap_or(0);
+
+    let mut result_parts: Vec<String> = Vec::new();
+
+    // Emit preamble (lines before first section)
+    for line in lines.iter().take(preamble_end) {
+        result_parts.push(line.to_string());
+    }
+
+    // Walk root Object entries in tree order
+    for (key, value) in root_entries {
+        // Skip comment entries - they'll come with preserved sections or be emitted manually
+        if key.starts_with("__comment_") {
+            if let YamlValue::Comment(comment) = value.value() {
+                // Check if this comment's source_line falls within the preamble
+                // or a preserved section — if so, it's already been emitted
+                if let Some(src_line) = comment.source_line() {
+                    let line_idx = src_line - 1; // 1-indexed to 0-indexed
+                                                 // Skip if in preamble (already emitted above)
+                    if line_idx < preamble_end {
+                        continue;
+                    }
+                    // Skip if in a preserved (unmodified) section
+                    let in_preserved_section = sections.iter().any(|s| {
+                        line_idx >= s.start_line
+                            && line_idx < s.end_line
+                            && section_map.contains_key(s.key.as_str())
+                    });
+                    if in_preserved_section {
+                        continue;
+                    }
+                }
+                // Standalone comment not in a preserved section - emit it
+                result_parts.push(format!("# {}", comment.content()));
+            }
+            continue;
+        }
+
+        if let Some(section) = section_map.get(key.as_str()) {
+            if !has_non_comment_modifications(value) {
+                // Unmodified section: emit original lines verbatim
+                for line in lines.iter().take(section.end_line).skip(section.start_line) {
+                    result_parts.push(line.to_string());
+                }
+            } else {
+                // Modified section: emit any leading gap lines (blank/comment),
+                // then re-serialize
+                // Find where the actual key line starts within the section range
+                let key_line = lines
+                    .iter()
+                    .enumerate()
+                    .take(section.end_line)
+                    .skip(section.start_line)
+                    .find(|(_, l)| extract_top_level_key(l).is_some())
+                    .map(|(i, _)| i)
+                    .unwrap_or(section.start_line);
+                // Emit leading gap lines (comments/blank lines before the key)
+                for line in lines.iter().take(key_line).skip(section.start_line) {
+                    result_parts.push(line.to_string());
+                }
+                // Re-serialize the modified section
+                match serialize_section(key, value, tree) {
+                    Ok(serialized) => {
+                        result_parts.push(serialized);
+                    }
+                    Err(_) => return None, // Fall back to slow path
+                }
+            }
+        } else {
+            // New key (not in original): serialize fresh
+            match serialize_section(key, value, tree) {
+                Ok(serialized) => {
+                    result_parts.push(serialized);
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
+    // Join all parts
+    let mut output = result_parts.join("\n");
+
+    // Ensure trailing newline matches original
+    if original.ends_with('\n') && !output.ends_with('\n') {
+        output.push('\n');
+    }
+
+    Some(output)
 }
 
 /// Converts a YamlNode tree to a serde_yaml::Value.
@@ -605,13 +864,40 @@ pub fn save_yaml_file<P: AsRef<Path>>(path: P, tree: &YamlTree, config: &Config)
     // Fast path: if only comments were edited, patch the original source directly
     if let Some(original) = tree.original_source() {
         if !has_non_comment_modifications(tree.root()) {
-            if let Some(updated) = apply_comment_edits_to_source(original, tree.root()) {
+            // Check that the key set hasn't changed (no additions/deletions)
+            let structure_unchanged = match tree.root().value() {
+                YamlValue::Object(entries) => {
+                    let tree_keys: Vec<&str> = entries
+                        .keys()
+                        .filter(|k| !k.starts_with("__comment_"))
+                        .map(|k| k.as_str())
+                        .collect();
+                    let original_sections = parse_section_ranges(original);
+                    let orig_keys: Vec<&str> =
+                        original_sections.iter().map(|s| s.key.as_str()).collect();
+                    tree_keys == orig_keys
+                }
+                _ => true,
+            };
+
+            if structure_unchanged {
+                if let Some(updated) = apply_comment_edits_to_source(original, tree.root()) {
+                    write_file_atomic(path, updated.as_bytes(), should_compress)?;
+                    return Ok(());
+                }
+            }
+        }
+
+        // Medium path: section-level preservation for structural edits
+        if matches!(tree.root().value(), YamlValue::Object(_)) {
+            if let Some(updated) = save_with_section_preservation(original, tree) {
                 write_file_atomic(path, updated.as_bytes(), should_compress)?;
                 return Ok(());
             }
         }
     }
 
+    // Slow path: full re-serialization
     // Convert YamlNode to serde_yaml::Value (comments are skipped, aliases resolved)
     let value = convert_to_serde_value(tree.root(), tree)?;
 
@@ -2155,5 +2441,593 @@ services:
         // Verify the saved content is character-for-character what we expect
         let expected = yaml.replace("# old header", "# new header");
         assert_eq!(saved, expected, "Only the edited comment should change");
+    }
+
+    // Section-level format preservation tests
+
+    #[test]
+    fn test_section_range_parsing() {
+        let yaml = "# preamble\napplication:\n  name: test\n  version: 1.0\n# --- separator ---\ndefaults:\n  cpu: 500m\nservices:\n  - name: api\n";
+        let sections = parse_section_ranges(yaml);
+
+        assert_eq!(sections.len(), 3);
+
+        assert_eq!(sections[0].key, "application");
+        assert_eq!(sections[0].start_line, 1); // skips preamble at line 0
+
+        assert_eq!(sections[1].key, "defaults");
+        // Should include the separator comment
+        assert_eq!(sections[1].start_line, 4);
+
+        assert_eq!(sections[2].key, "services");
+    }
+
+    #[test]
+    fn test_section_range_parsing_no_preamble() {
+        let yaml = "name: test\nversion: 1.0\n";
+        let sections = parse_section_ranges(yaml);
+
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].key, "name");
+        assert_eq!(sections[0].start_line, 0);
+        assert_eq!(sections[1].key, "version");
+        assert_eq!(sections[1].start_line, 1);
+    }
+
+    #[test]
+    fn test_extract_top_level_key_plain() {
+        assert_eq!(
+            extract_top_level_key("application:"),
+            Some("application".to_string())
+        );
+        assert_eq!(
+            extract_top_level_key("name: test"),
+            Some("name".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_top_level_key_quoted() {
+        assert_eq!(
+            extract_top_level_key("\"app name\": test"),
+            Some("app name".to_string())
+        );
+        assert_eq!(
+            extract_top_level_key("'app name': test"),
+            Some("app name".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_top_level_key_non_keys() {
+        assert_eq!(extract_top_level_key("  indented: value"), None);
+        assert_eq!(extract_top_level_key("# comment"), None);
+        assert_eq!(extract_top_level_key(""), None);
+        assert_eq!(extract_top_level_key("- item"), None);
+    }
+
+    #[test]
+    fn test_medium_path_preserves_unmodified_sections() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = r#"application:
+  name: "fleet-manager"
+  version: 2.4.1
+defaults:
+  cpu: 500m
+  memory: 512Mi
+services:
+  - name: api-gateway
+"#;
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify only the 'application' section
+        if let YamlValue::Object(ref mut entries) = node.value {
+            if let Some(app) = entries.get_mut("application") {
+                if let YamlValue::Object(ref mut app_entries) = app.value_mut() {
+                    app_entries
+                        .insert("debug".to_string(), YamlNode::new(YamlValue::Boolean(true)));
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Unmodified sections should be preserved verbatim
+        assert!(
+            saved.contains("defaults:\n  cpu: 500m\n  memory: 512Mi"),
+            "defaults section should be byte-identical. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("services:\n  - name: api-gateway"),
+            "services section should be byte-identical. Got:\n{}",
+            saved
+        );
+
+        // Modified section should contain new value
+        assert!(saved.contains("debug"), "New field should appear");
+
+        // Verify overall validity
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        assert_eq!(parsed["defaults"]["cpu"], "500m");
+        assert_eq!(parsed["application"]["debug"], true);
+    }
+
+    #[test]
+    fn test_medium_path_preserves_anchors_aliases() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = r#"application:
+  name: fleet-manager
+defaults:
+  resource_limits: &default_limits
+    cpu: "500m"
+    memory: "512Mi"
+services:
+  - name: api
+    resources: *default_limits
+"#;
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify only 'application'
+        if let YamlValue::Object(ref mut entries) = node.value {
+            if let Some(app) = entries.get_mut("application") {
+                if let YamlValue::Object(ref mut app_entries) = app.value_mut() {
+                    app_entries.insert(
+                        "version".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("2.0".to_string()))),
+                    );
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        assert!(
+            saved.contains("&default_limits"),
+            "Anchor should be preserved in unmodified section. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("*default_limits"),
+            "Alias should be preserved in unmodified section. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("cpu: \"500m\""),
+            "Quoted strings should be preserved. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_medium_path_preserves_quoted_strings() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = "application:\n  name: test\nconfig:\n  host: \"localhost\"\n  port: '8080'\n";
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify only 'application'
+        if let YamlValue::Object(ref mut entries) = node.value {
+            if let Some(app) = entries.get_mut("application") {
+                if let YamlValue::Object(ref mut app_entries) = app.value_mut() {
+                    app_entries
+                        .insert("debug".to_string(), YamlNode::new(YamlValue::Boolean(true)));
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        assert!(
+            saved.contains("host: \"localhost\""),
+            "Double-quoted strings should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("port: '8080'"),
+            "Single-quoted strings should be preserved. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_medium_path_preserves_scientific_notation() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = "application:\n  name: test\nfeature_flags:\n  timeout_ns: 1.5e9\n  rate: 2.0\n";
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify only 'application'
+        if let YamlValue::Object(ref mut entries) = node.value {
+            if let Some(app) = entries.get_mut("application") {
+                if let YamlValue::Object(ref mut app_entries) = app.value_mut() {
+                    app_entries.insert(
+                        "version".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("2.0".to_string()))),
+                    );
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        assert!(
+            saved.contains("timeout_ns: 1.5e9"),
+            "Scientific notation should be preserved. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_medium_path_handles_new_key() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = "application:\n  name: test\ndefaults:\n  cpu: 500m\n";
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Add a new top-level key
+        if let YamlValue::Object(ref mut entries) = node.value {
+            let mut new_section = IndexMap::new();
+            new_section.insert(
+                "enabled".to_string(),
+                YamlNode::new(YamlValue::Boolean(true)),
+            );
+            entries.insert(
+                "monitoring".to_string(),
+                YamlNode::new(YamlValue::Object(new_section)),
+            );
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Original sections preserved
+        assert!(
+            saved.contains("application:\n  name: test"),
+            "Existing sections should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("defaults:\n  cpu: 500m"),
+            "Existing sections should be preserved. Got:\n{}",
+            saved
+        );
+
+        // New key should appear
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        assert_eq!(parsed["monitoring"]["enabled"], true);
+    }
+
+    #[test]
+    fn test_medium_path_handles_deleted_key() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = "application:\n  name: test\ndefaults:\n  cpu: 500m\nservices:\n  - name: api\n";
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Delete 'defaults' key
+        if let YamlValue::Object(ref mut entries) = node.value_mut() {
+            entries.shift_remove("defaults");
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // 'defaults' should be gone
+        assert!(
+            !saved.contains("defaults:"),
+            "Deleted key should not appear. Got:\n{}",
+            saved
+        );
+
+        // Other sections preserved
+        assert!(
+            saved.contains("application:\n  name: test"),
+            "application should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("services:\n  - name: api"),
+            "services should be preserved. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_medium_path_preserves_comments_between_sections() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = "application:\n  name: test\n# --- Banner Comment ---\ndefaults:\n  cpu: 500m\n# --- Another Banner ---\nservices:\n  - name: api\n";
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify only 'application'
+        if let YamlValue::Object(ref mut entries) = node.value {
+            if let Some(app) = entries.get_mut("application") {
+                if let YamlValue::Object(ref mut app_entries) = app.value_mut() {
+                    app_entries
+                        .insert("debug".to_string(), YamlNode::new(YamlValue::Boolean(true)));
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Banner comments should be preserved
+        assert!(
+            saved.contains("# --- Banner Comment ---"),
+            "Banner comment should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("# --- Another Banner ---"),
+            "Second banner comment should be preserved. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_medium_path_falls_back_for_array_root() {
+        use crate::document::parser::parse_yaml_auto;
+
+        let yaml = "- name: item1\n- name: item2\n";
+        let node = parse_yaml_auto(yaml).unwrap();
+
+        // Array root: medium path should return None, fall to slow path
+        let result = save_with_section_preservation(
+            yaml,
+            &YamlTree::with_source(node, Some(yaml.to_string())),
+        );
+        assert!(
+            result.is_none(),
+            "Array root should not use section preservation"
+        );
+    }
+
+    #[test]
+    fn test_medium_path_complex_yaml() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = r#"# =============================================================
+# Complex YAML Example
+# =============================================================
+application:
+  name: fleet-manager
+  version: 2.4.1
+  environment: production
+# --- Anchors & Aliases ---
+defaults:
+  resource_limits: &default_limits
+    cpu: 500m
+    memory: 512Mi
+# --- Metadata ---
+metadata:
+  description: |
+    Fleet Manager orchestrates distributed microservices
+    across multiple cloud regions.
+# --- Feature Flags ---
+feature_flags:
+  new_routing_engine: true
+  timeout_ns: 1.5e9
+  max_iterations: 9_999_999
+"#;
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify only 'application'
+        if let YamlValue::Object(ref mut entries) = node.value {
+            if let Some(app) = entries.get_mut("application") {
+                if let YamlValue::Object(ref mut app_entries) = app.value_mut() {
+                    app_entries.insert(
+                        "debug".to_string(),
+                        YamlNode::new(YamlValue::Boolean(false)),
+                    );
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Unmodified sections byte-identical
+        assert!(
+            saved.contains("&default_limits"),
+            "Anchor should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("timeout_ns: 1.5e9"),
+            "Scientific notation should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("max_iterations: 9_999_999"),
+            "Underscore notation should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("description: |"),
+            "Literal block scalar should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("# --- Anchors & Aliases ---"),
+            "Section comments should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("# --- Metadata ---"),
+            "Section comments should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("# --- Feature Flags ---"),
+            "Section comments should be preserved. Got:\n{}",
+            saved
+        );
+
+        // Modified section should have new value
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        assert_eq!(parsed["application"]["debug"], false);
+        assert_eq!(parsed["application"]["name"], "fleet-manager");
+    }
+
+    #[test]
+    fn test_medium_path_preserves_flow_mappings() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        // Flow mappings like {k: v} are preserved in unmodified sections
+        let yaml = "application:\n  name: test\nconfig:\n  settings: {debug: true, verbose: false}\n  port: 8080\n";
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify only 'application'
+        if let YamlValue::Object(ref mut entries) = node.value {
+            if let Some(app) = entries.get_mut("application") {
+                if let YamlValue::Object(ref mut app_entries) = app.value_mut() {
+                    app_entries.insert(
+                        "version".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("2.0".to_string()))),
+                    );
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        assert!(
+            saved.contains("{debug: true, verbose: false}"),
+            "Flow mapping should be preserved in unmodified section. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_medium_path_no_preamble_comment_duplication() {
+        use crate::document::parser::parse_yaml_auto;
+        use tempfile::NamedTempFile;
+
+        let yaml = r#"# =============================================================
+# Complex YAML Example
+# =============================================================
+application:
+  name: "fleet-manager"
+  version: "2.4.1"
+defaults:
+  cpu: "500m"
+"#;
+
+        let mut node = parse_yaml_auto(yaml).unwrap();
+
+        // Modify only 'application'
+        if let YamlValue::Object(ref mut entries) = node.value {
+            if let Some(app) = entries.get_mut("application") {
+                if let YamlValue::Object(ref mut app_entries) = app.value_mut() {
+                    app_entries.insert(
+                        "debug".to_string(),
+                        YamlNode::new(YamlValue::Boolean(false)),
+                    );
+                }
+            }
+        }
+
+        let tree = YamlTree::with_source(node, Some(yaml.to_string()));
+        let config = Config::default();
+
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Preamble comments should appear exactly once
+        let count = saved
+            .matches("# =============================================================")
+            .count();
+        assert_eq!(
+            count, 2,
+            "Preamble header/footer comments should appear exactly twice (not duplicated). Got:\n{}",
+            saved
+        );
+        let count = saved.matches("# Complex YAML Example").count();
+        assert_eq!(
+            count, 1,
+            "Preamble title comment should appear exactly once. Got:\n{}",
+            saved
+        );
+
+        // Unmodified section preserved
+        assert!(
+            saved.contains("defaults:\n  cpu: \"500m\""),
+            "Unmodified section should be preserved. Got:\n{}",
+            saved
+        );
     }
 }
