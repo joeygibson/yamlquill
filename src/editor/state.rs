@@ -4099,12 +4099,21 @@ impl EditorState {
                 self.rebuild_tree_view();
                 self.checkpoint();
             }
-            YamlValue::Object(_) => {
-                // For objects, we can't easily insert before a key-value pair
-                // For now, return an error
-                return Err(anyhow!(
-                    "Adding comments to object entries not yet supported. Use arrays or standalone comments."
-                ));
+            YamlValue::Object(entries) => {
+                // Find a unique __comment_N__ key
+                let mut n = 0;
+                loop {
+                    let candidate = format!("__comment_{}__", n);
+                    if !entries.contains_key(&candidate) {
+                        break;
+                    }
+                    n += 1;
+                }
+                let key = format!("__comment_{}__", n);
+                entries.shift_insert(current_index, key, comment_node);
+                self.mark_dirty();
+                self.rebuild_tree_view();
+                self.checkpoint();
             }
             YamlValue::MultiDoc(docs) => {
                 // Insert comment before current document

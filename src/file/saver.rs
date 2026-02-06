@@ -30,6 +30,27 @@ fn has_non_comment_modifications(node: &YamlNode) -> bool {
     }
 }
 
+/// Checks if a subtree contains any new (user-added) comments.
+///
+/// New comments have no `source_line`, meaning they weren't parsed from
+/// the original file. Their presence means the section must be re-serialized
+/// rather than preserved verbatim.
+fn has_new_comments(node: &YamlNode) -> bool {
+    match node.value() {
+        YamlValue::Comment(c) => c.source_line().is_none(),
+        YamlValue::Object(entries) => entries.values().any(has_new_comments),
+        YamlValue::Array(elements) => elements.iter().any(has_new_comments),
+        YamlValue::MultiDoc(docs) => docs.iter().any(has_new_comments),
+        _ => false,
+    }
+}
+
+/// Checks if a subtree needs re-serialization (has structural modifications
+/// or new comments).
+fn needs_reserialization(node: &YamlNode) -> bool {
+    has_non_comment_modifications(node) || has_new_comments(node)
+}
+
 /// Collects all comment nodes from the tree with their source line numbers.
 ///
 /// Returns `(content, source_line)` pairs. Comments without a source line
@@ -345,7 +366,7 @@ fn save_with_section_preservation(original: &str, tree: &YamlTree) -> Option<Str
         }
 
         if let Some(section) = section_map.get(key.as_str()) {
-            if !has_non_comment_modifications(value) {
+            if !needs_reserialization(value) {
                 // Unmodified section: emit original lines verbatim
                 for line in lines.iter().take(section.end_line).skip(section.start_line) {
                     result_parts.push(line.to_string());
