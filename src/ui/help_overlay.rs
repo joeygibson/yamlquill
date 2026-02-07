@@ -143,7 +143,7 @@ pub fn render_help_overlay(f: &mut Frame, colors: &ThemeColors, scroll: usize) {
         )]),
         Line::from(vec![
             Span::styled("  e             ", Style::default().fg(colors.number)),
-            Span::raw("Enter INSERT mode (edit values/keys)"),
+            Span::raw("Enter EDIT mode (edit values/keys)"),
         ]),
         Line::from(vec![
             Span::styled("  :             ", Style::default().fg(colors.number)),
@@ -235,6 +235,10 @@ pub fn render_help_overlay(f: &mut Frame, colors: &ThemeColors, scroll: usize) {
         Line::from(vec![
             Span::styled("  o             ", Style::default().fg(colors.number)),
             Span::raw("Add empty object {} after cursor"),
+        ]),
+        Line::from(vec![
+            Span::styled("  c             ", Style::default().fg(colors.number)),
+            Span::raw("Add a comment above current node"),
         ]),
         Line::from(vec![
             Span::styled("  r             ", Style::default().fg(colors.number)),
