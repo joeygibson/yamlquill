@@ -15,13 +15,15 @@ A terminal-based structural YAML editor with vim-style keybindings.
 [![CI](https://github.com/joeygibson/yamlquill/workflows/CI/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/ci.yml)
 [![Release](https://github.com/joeygibson/yamlquill/workflows/Release/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/release.yml)
 
-**Phase 3 Complete** - Multi-document YAML support. The editor currently supports:
+**v1.1** - Full-featured YAML editor with comment support and format preservation. The editor supports:
 - YAML file loading and editing (single and multi-document with `---` separators)
 - Tree-based navigation with vim keybindings
 - Advanced navigation (sibling jumping, screen positioning, count prefixes, fold commands)
 - Add, edit, delete operations for YAML values
 - Full YAML type support (Plain/Literal/Folded strings, Integer/Float numbers, Boolean, Null)
-- Type-aware display (shows string styles: `"text"`, `| text...`, `> text...`)
+- Type-aware display (shows string styles: `text`, `| text...`, `> text...`)
+- Comment support (parse, display, add, and save comments)
+- Anchor/alias display with `&name` badges and `*name` nodes, with navigation (Enter on alias jumps to anchor)
 - Undo/redo functionality with repeat command and branching tree
 - Clipboard operations (yank/paste with path copying, smart paste, named registers a-z and 0-9)
 - Visual mode for bulk operations on multiple nodes
@@ -33,26 +35,22 @@ A terminal-based structural YAML editor with vim-style keybindings.
 - Configuration file support
 - Mouse/trackpad scrolling support
 - Gzip compression support (transparent `.yaml.gz` handling)
+- Section-level format preservation (unmodified sections survive save verbatim)
 
-**Recent improvements (Phase 3):**
-- Multi-document YAML parsing and serialization with proper `---` separators
-- Round-trip preservation of multi-document structure
-- Comprehensive test coverage (290 tests + 79 doctests = 369 total)
-
-**Known limitations (v1.0):**
-- No comment support (serde_yaml limitation, planned for v2.0 with custom parser)
-- No anchor/alias creation or editing (serde_yaml limitation, planned for v2.0)
+**Known limitations (v1.1):**
+- Anchors/aliases are preserved for value edits, key additions, and comment additions via line-level patching; only complex structural changes (e.g., deleting keys, adding array items) in anchor sections cause aliases to be resolved to inline values
+- No anchor/alias creation or editing via UI
 - Multi-line string editing requires external editor (Shift+Enter not supported in terminal)
-- Format preservation for unmodified nodes is basic
 
 **Completed phases:**
 - ✅ Phase 1: Core Structure (YAML parsing, basic editing)
 - ✅ Phase 2: YAML Document Model (full editing, undo/redo, registers, type-aware display, navigation)
 - ✅ Phase 3: Multi-Document Support (multiple `---` separated documents)
+- ✅ Phase 4: YAML-Specific Features (anchors/aliases, comment support)
+- ✅ Phase 5: Polish & Parity (themes, gzip, format preservation)
 
 **Planned for v2.0+:**
-- Comment support (requires custom parser)
-- Anchor and alias creation/editing (requires custom parser)
+- Anchor and alias creation/editing via UI
 - Advanced multi-line string controls (chomping indicators, indentation control)
 
 See [CLAUDE.md](CLAUDE.md) for detailed feature list and developer documentation.
@@ -482,10 +480,11 @@ preserve_formatting = true
 
 ### Format Preservation ✅
 
-YAMLQuill preserves the original formatting of unmodified YAML nodes when saving files. This means:
-- Nodes you don't edit keep their exact original whitespace, indentation, and newlines
+YAMLQuill preserves the original formatting of unmodified YAML sections when saving files. This means:
+- Unmodified top-level sections keep their exact original text, including comments, anchors, and aliases
 - Multi-line strings preserve their style (literal `|` or folded `>`)
-- Only modified nodes are reformatted according to your indent settings
+- Only modified sections are re-serialized
+- Anchors (`&name`) and aliases (`*name`) in modified sections are preserved via line-level patching for value edits, key additions, and comment additions. Only complex structural changes (key deletion, array item insertion) fall back to full re-serialization.
 
 ### Saving Settings
 
@@ -538,10 +537,10 @@ YAMLQuill development follows a phased approach:
 - **Phase 1** ✅ Core structure (complete)
 - **Phase 2** ✅ YAML document model (complete)
 - **Phase 3** ✅ Multi-document support (complete)
-- **Phase 4** ⏸️ YAML-specific features (deferred to v2.0 - requires custom parser)
+- **Phase 4** ✅ YAML-specific features (anchors/aliases, comments)
 - **Phase 5** ✅ Polish & feature parity with JSONQuill (complete)
 
-**v1.0 is feature-complete!** See [CLAUDE.md](CLAUDE.md) for detailed development documentation.
+**v1.1 is feature-complete!** See [CLAUDE.md](CLAUDE.md) for detailed development documentation.
 
 ### Version Management
 

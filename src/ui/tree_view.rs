@@ -727,13 +727,13 @@ fn format_number(n: f64) -> String {
 /// Formats a YamlNumber for display.
 /// Formats a YAML string with style indicators.
 ///
-/// - Plain strings: `"hello"`
+/// - Plain strings: `hello`
 /// - Literal strings (|): `| line1\nline2`
 /// - Folded strings (>): `> folded text`
 fn format_yaml_string_preview(s: &crate::document::node::YamlString) -> String {
     use crate::document::node::YamlString;
     match s {
-        YamlString::Plain(content) => format!("\"{}\"", content),
+        YamlString::Plain(content) => content.clone(),
         YamlString::Literal(content) => {
             // Show first line with | indicator
             let first_line = content.lines().next().unwrap_or("");
@@ -1065,7 +1065,7 @@ mod tests {
         // Scalars still use simple format
         assert_eq!(
             state.get_value_preview(&YamlValue::String(YamlString::Plain("test".to_string()))),
-            "\"test\""
+            "test"
         );
         assert_eq!(
             state.get_value_preview(&YamlValue::Number(YamlNumber::Float(std::f64::consts::PI))),

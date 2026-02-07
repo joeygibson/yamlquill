@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **YAMLQuill** is a terminal-based structural YAML editor with vim-style keybindings, forked from [JSONQuill](https://github.com/joeygibson/jsonquill). The goal is to achieve full feature parity with JSONQuill while adding support for YAML-specific features including multi-document files, anchors/aliases, and multi-line strings.
 
-**Status:** Phase 4 Complete - Full anchor/alias support with navigation
+**Status:** Phase 5 Complete (v1.1) - Full feature parity with comment support, section-level format preservation, and anchor/alias display/navigation
 
 ## Development Workflow
 
@@ -56,7 +56,7 @@ cargo clippy -- -D warnings
    ```bash
    cargo test
    ```
-   All tests must pass (currently 388 tests expected).
+   All tests must pass (currently ~437 tests expected).
 
 4. **Documentation updates:**
    - Update CLAUDE.md if implementation changes project status
@@ -243,7 +243,6 @@ pub enum YamlNumber {
 - ✅ Added 2 navigation tests
 
 **Deferred to v2.0:**
-- ❌ Comment support (requires comment-preserving parser)
 - ❌ Create/edit anchors and aliases via UI
 
 **Already implemented (Phase 2):**
@@ -259,10 +258,13 @@ pub enum YamlNumber {
 - ✅ Help overlay updated for YAML (shows "YAMLQuill Help")
 - ✅ Gzip support (.yaml.gz, .yml.gz) working
 - ✅ Format preservation for unmodified nodes implemented
-- ✅ Test coverage: 290 tests + 79 doctests = 369 total
+- ✅ Section-level format preservation for structural edits (medium path)
+- ✅ Anchor/alias preservation on save via line-level patching
+- ✅ Comment support: parse, display, add, and save comments
+- ✅ Test coverage: ~358 unit/integration + 79 doctests = ~437 total
 - ✅ Documentation updated (README.md reflects current state)
 
-**v1.0 Feature Parity Achieved!**
+**v1.0 Feature Parity Achieved! v1.1 adds comment support and format preservation improvements.**
 
 ## Tech Stack
 
@@ -290,18 +292,20 @@ pub enum YamlNumber {
 - ✅ All 15 themes from JSONQuill
 - ✅ Gzip compression support (.yaml.gz)
 - ✅ Format preservation for unmodified nodes
+- ✅ Section-level format preservation for structural edits
+- ✅ Anchor/alias preservation on save via line-level patching
+- ✅ Comment support (parse, display, add, save)
 - ✅ Anchor delete protection and read-only alias enforcement
 
-### v1.0 Known Limitations
+### v1.1 Known Limitations
 
-- ❌ No comment support (yaml-rust2 doesn't preserve comments)
-- ❌ Cannot create new anchors/aliases (display, navigate, and enforce only)
-- ❌ No tag editing (preserved but not editable)
-- ❌ No advanced multi-line features (chomping, indentation indicators)
+- Anchors/aliases are preserved for value edits, key additions, and comment additions via line-level patching; only complex structural changes (e.g., deleting keys, adding array items) in anchor sections fall back to serde_yaml which resolves aliases to inline values
+- Cannot create new anchors/aliases via UI (display, navigate, and enforce only)
+- No tag editing (preserved but not editable)
+- No advanced multi-line features (chomping, indentation indicators)
 
 ### v2.0+ Future Enhancements
 
-- Comment support (requires comment-preserving parser)
 - Create/edit anchors and aliases via UI
 - YAML tag editing
 - Advanced multi-line string controls
@@ -338,7 +342,7 @@ cargo test test_parse_simple_yaml
 - `tests/yaml_display_tests.rs` - Type-aware display
 - `tests/yaml_editing_tests.rs` - Value editing operations
 
-**Current Status:** 390 tests passing (311 unit tests + 79 doctests)
+**Current Status:** ~437 tests passing (~358 unit/integration + 79 doctests)
 
 ### Test Coverage Goals
 

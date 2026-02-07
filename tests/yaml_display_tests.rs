@@ -1,7 +1,7 @@
 //! Tests for YAML-aware display features (Phase 2e)
 //!
 //! Validates that the tree view correctly displays YAML type indicators:
-//! - Plain strings: "text"
+//! - Plain strings: text
 //! - Literal strings: | multiline
 //! - Folded strings: > folded
 //! - Integers vs Floats
@@ -16,10 +16,7 @@ use yamlquill::ui::tree_view::{format_collapsed_preview, TreeViewState};
 fn test_plain_string_display() {
     let node = YamlNode::new(YamlValue::String(YamlString::Plain("hello".to_string())));
     let preview = format_collapsed_preview(&node, 100);
-    assert_eq!(
-        preview, "\"hello\"",
-        "Plain strings should show with quotes"
-    );
+    assert_eq!(preview, "hello", "Plain strings should show without quotes");
 }
 
 #[test]
@@ -161,7 +158,7 @@ fn test_tree_view_shows_string_styles() {
 
     // Check plain string
     assert_eq!(lines[0].key, Some("plain".to_string()));
-    assert_eq!(lines[0].value_preview, "\"plain text\"");
+    assert_eq!(lines[0].value_preview, "plain text");
 
     // Check literal string
     assert_eq!(lines[1].key, Some("literal".to_string()));

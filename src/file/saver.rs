@@ -51,6 +51,19 @@ fn needs_reserialization(node: &YamlNode) -> bool {
     has_non_comment_modifications(node) || has_new_comments(node)
 }
 
+/// Checks if any node in the subtree has an anchor or is an alias.
+fn section_has_anchors_or_aliases(node: &YamlNode) -> bool {
+    if node.anchor().is_some() {
+        return true;
+    }
+    match node.value() {
+        YamlValue::Alias(_) => true,
+        YamlValue::Object(entries) => entries.values().any(section_has_anchors_or_aliases),
+        YamlValue::Array(elements) => elements.iter().any(section_has_anchors_or_aliases),
+        _ => false,
+    }
+}
+
 /// Collects all comment nodes from the tree with their source line numbers.
 ///
 /// Returns `(content, source_line)` pairs. Comments without a source line
@@ -304,6 +317,488 @@ fn serialize_section(key: &str, node: &YamlNode, tree: &YamlTree) -> Result<Stri
     Ok(result)
 }
 
+/// Collects all modified leaf nodes with their key paths relative to the given node.
+fn collect_modified_leaves<'a>(
+    node: &'a YamlNode,
+    path: &mut Vec<String>,
+    results: &mut Vec<(Vec<String>, &'a YamlNode)>,
+) {
+    match node.value() {
+        YamlValue::Comment(_) | YamlValue::Alias(_) => {}
+        YamlValue::Object(entries) => {
+            for (key, value) in entries {
+                if key.starts_with("__comment_") {
+                    continue;
+                }
+                path.push(key.clone());
+                collect_modified_leaves(value, path, results);
+                path.pop();
+            }
+        }
+        YamlValue::Array(elements) => {
+            let mut source_idx = 0;
+            for elem in elements {
+                if matches!(elem.value(), YamlValue::Comment(_)) {
+                    continue;
+                }
+                path.push(format!("[{}]", source_idx));
+                collect_modified_leaves(elem, path, results);
+                path.pop();
+                source_idx += 1;
+            }
+        }
+        _ => {
+            if node.is_modified() {
+                results.push((path.clone(), node));
+            }
+        }
+    }
+}
+
+/// Formats a node's value as a YAML scalar for inline replacement.
+fn format_node_value_for_yaml(node: &YamlNode) -> String {
+    match node.value() {
+        YamlValue::Null => "null".to_string(),
+        YamlValue::Boolean(b) => if *b { "true" } else { "false" }.to_string(),
+        YamlValue::Number(n) => match n {
+            YamlNumber::Integer(i) => i.to_string(),
+            YamlNumber::Float(f) => {
+                if f.fract() == 0.0 {
+                    format!("{}", *f as i64)
+                } else {
+                    f.to_string()
+                }
+            }
+        },
+        YamlValue::String(s) => {
+            let text = s.as_str();
+            // Quote strings that could be misinterpreted as other YAML types
+            if text.is_empty()
+                || text.parse::<i64>().is_ok()
+                || text.parse::<f64>().is_ok()
+                || matches!(
+                    text.to_lowercase().as_str(),
+                    "true" | "false" | "null" | "yes" | "no" | "on" | "off" | "~"
+                )
+            {
+                format!("'{}'", text.replace('\'', "''"))
+            } else {
+                text.to_string()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+/// Finds the source line index for a key path within a section.
+///
+/// Navigates the YAML source structure by tracking indentation levels
+/// to locate the line where a specific key-value pair appears.
+fn find_value_line_in_section(
+    lines: &[String],
+    key_path: &[String],
+    section_key_line: usize,
+) -> Option<usize> {
+    if key_path.is_empty() {
+        return None;
+    }
+
+    let mut search_from = section_key_line + 1;
+    let mut scope_indent: i32 = -1;
+
+    for (path_idx, key) in key_path.iter().enumerate() {
+        let is_last = path_idx == key_path.len() - 1;
+
+        if key.starts_with('[') && key.ends_with(']') {
+            // Array index
+            let target_idx: usize = key[1..key.len() - 1].parse().ok()?;
+            let mut item_count = 0;
+            let mut found_line = None;
+            let mut item_indent: Option<usize> = None;
+
+            for (line_idx, line) in lines.iter().enumerate().skip(search_from) {
+                let indent = line.len() - line.trim_start().len();
+                let trimmed = line.trim_start();
+
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+
+                if (indent as i32) <= scope_indent {
+                    break;
+                }
+
+                if trimmed.starts_with("- ") || trimmed == "-" {
+                    if let Some(ii) = item_indent {
+                        if indent != ii {
+                            continue; // nested array item, skip
+                        }
+                    } else {
+                        item_indent = Some(indent);
+                    }
+
+                    if indent == item_indent.unwrap() {
+                        if item_count == target_idx {
+                            found_line = Some(line_idx);
+                            break;
+                        }
+                        item_count += 1;
+                    }
+                }
+            }
+
+            let found = found_line?;
+
+            if is_last {
+                return Some(found);
+            }
+
+            let dash_indent = lines[found].len() - lines[found].trim_start().len();
+            scope_indent = dash_indent as i32;
+            search_from = found;
+        } else {
+            // Object key
+            let mut found_line = None;
+
+            for (line_idx, line) in lines.iter().enumerate().skip(search_from) {
+                let indent = line.len() - line.trim_start().len();
+                let trimmed = line.trim_start();
+
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+
+                if (indent as i32) <= scope_indent && line_idx > search_from {
+                    break;
+                }
+
+                // Handle "- key: value" lines
+                let key_part = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+
+                if is_key_match(key_part, key) {
+                    found_line = Some(line_idx);
+                    break;
+                }
+            }
+
+            let found = found_line?;
+
+            if is_last {
+                return Some(found);
+            }
+
+            let found_indent = lines[found].len() - lines[found].trim_start().len();
+            scope_indent = found_indent as i32;
+            search_from = found + 1;
+        }
+    }
+
+    None
+}
+
+/// Replaces the value portion of a `key: value` line, preserving
+/// indentation, key, and any inline comment.
+fn replace_value_on_line(line: &str, new_value: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let indent = &line[..line.len() - trimmed.len()];
+
+    // Handle "- key: value" prefix
+    let (prefix, key_part) = if let Some(after_dash) = trimmed.strip_prefix("- ") {
+        ("- ", after_dash)
+    } else {
+        ("", trimmed)
+    };
+
+    // Find the key-value separator position in key_part
+    let colon_pos = if let Some(after_dq) = key_part.strip_prefix('"') {
+        let end_quote = after_dq.find('"')? + 1;
+        if key_part[end_quote + 1..].starts_with(": ") {
+            end_quote + 1
+        } else {
+            return None;
+        }
+    } else if let Some(after_sq) = key_part.strip_prefix('\'') {
+        let end_quote = after_sq.find('\'')? + 1;
+        if key_part[end_quote + 1..].starts_with(": ") {
+            end_quote + 1
+        } else {
+            return None;
+        }
+    } else {
+        key_part.find(": ")?
+    };
+
+    let key_str = &key_part[..colon_pos];
+    let after_colon_space = &key_part[colon_pos + 2..];
+
+    // Check for inline comment
+    if let Some(hash_pos) = find_comment_hash(after_colon_space) {
+        let gap = &after_colon_space[after_colon_space[..hash_pos].trim_end().len()..hash_pos];
+        let comment = &after_colon_space[hash_pos..];
+        Some(format!(
+            "{}{}{}: {}{}{}",
+            indent, prefix, key_str, new_value, gap, comment
+        ))
+    } else {
+        Some(format!("{}{}{}: {}", indent, prefix, key_str, new_value))
+    }
+}
+
+/// Finds the insertion point and indent for a new key within a section.
+///
+/// Returns `(line_index, indent_string)` where `line_index` is where the new
+/// line should be inserted and `indent_string` is the whitespace prefix to use.
+fn find_insertion_point_and_indent(
+    lines: &[String],
+    parent_path: &[String],
+    section_key_line: usize,
+) -> Option<(usize, String)> {
+    // Find the parent container line
+    let parent_line = if parent_path.is_empty() {
+        section_key_line
+    } else {
+        find_value_line_in_section(lines, parent_path, section_key_line)?
+    };
+
+    let parent_indent = lines[parent_line].len() - lines[parent_line].trim_start().len();
+
+    // Find child indent and end of parent block
+    let mut child_indent: Option<usize> = None;
+    let mut end_pos = lines.len();
+
+    for (i, line) in lines.iter().enumerate().skip(parent_line + 1) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - trimmed.len();
+
+        if indent <= parent_indent {
+            end_pos = i;
+            break;
+        }
+
+        if child_indent.is_none() {
+            // For "- key: value" lines, the child indent is the indent of "- "
+            // but the next keys are at indent + 2 (after the dash-space)
+            child_indent = Some(indent);
+        }
+    }
+
+    let indent_str = " ".repeat(child_indent.unwrap_or(parent_indent + 2));
+    Some((end_pos, indent_str))
+}
+
+/// Finds the end of a key's value block in the source lines.
+///
+/// Starting from the key's line, scans forward until a line with indentation
+/// equal to or less than the key's indentation is found (or end of lines).
+/// Returns the line index where the block ends (i.e., the insertion point
+/// for content that should appear after this key's block).
+fn find_end_of_key_block(lines: &[String], key_line: usize) -> usize {
+    let key_indent = lines[key_line].len() - lines[key_line].trim_start().len();
+    for (i, line) in lines.iter().enumerate().skip(key_line + 1) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if indent <= key_indent {
+            return i;
+        }
+    }
+    lines.len()
+}
+
+/// Collects new (user-added) comment insertions from the tree, returning
+/// `(insert_position, formatted_comment_line)` pairs relative to the section lines.
+///
+/// Walks the tree looking for `__comment_N__` entries with no `source_line`,
+/// determines their position based on the preceding sibling key, and finds
+/// the corresponding insertion point in the source lines.
+fn collect_new_comment_insertions(
+    node: &YamlNode,
+    path: &mut Vec<String>,
+    lines: &[String],
+    results: &mut Vec<(usize, String)>,
+) {
+    match node.value() {
+        YamlValue::Object(entries) => {
+            let mut prev_non_comment_key: Option<String> = None;
+            for (key, value) in entries {
+                if key.starts_with("__comment_") {
+                    if let YamlValue::Comment(c) = value.value() {
+                        if c.source_line().is_none() {
+                            // New comment — find insertion position
+                            if let Some(ref prev_key) = prev_non_comment_key {
+                                // Insert after the preceding key's block
+                                let mut key_path = path.clone();
+                                key_path.push(prev_key.clone());
+                                if let Some(key_line) =
+                                    find_value_line_in_section(lines, &key_path, 0)
+                                {
+                                    let end = find_end_of_key_block(lines, key_line);
+                                    let indent =
+                                        lines[key_line].len() - lines[key_line].trim_start().len();
+                                    let comment_line =
+                                        format!("{}# {}", " ".repeat(indent), c.content());
+                                    results.push((end, comment_line));
+                                }
+                            } else {
+                                // Comment is first in the object — insert after parent's key line
+                                if !path.is_empty() {
+                                    if let Some(parent_line) =
+                                        find_value_line_in_section(lines, path, 0)
+                                    {
+                                        let parent_indent = lines[parent_line].len()
+                                            - lines[parent_line].trim_start().len();
+                                        let child_indent = parent_indent + 2;
+                                        let comment_line = format!(
+                                            "{}# {}",
+                                            " ".repeat(child_indent),
+                                            c.content()
+                                        );
+                                        results.push((parent_line + 1, comment_line));
+                                    }
+                                } else {
+                                    // Comment at root of section — insert after the section key line
+                                    let indent = if lines.len() > 1 {
+                                        let first_content = lines[1..].iter().find(|l| {
+                                            !l.trim().is_empty() && !l.trim().starts_with('#')
+                                        });
+                                        first_content.map_or(2, |l| l.len() - l.trim_start().len())
+                                    } else {
+                                        2
+                                    };
+                                    let comment_line =
+                                        format!("{}# {}", " ".repeat(indent), c.content());
+                                    results.push((1, comment_line));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+                prev_non_comment_key = Some(key.clone());
+                path.push(key.clone());
+                collect_new_comment_insertions(value, path, lines, results);
+                path.pop();
+            }
+        }
+        YamlValue::Array(elements) => {
+            let mut source_idx = 0;
+            for elem in elements {
+                if matches!(elem.value(), YamlValue::Comment(_)) {
+                    continue;
+                }
+                path.push(format!("[{}]", source_idx));
+                collect_new_comment_insertions(elem, path, lines, results);
+                path.pop();
+                source_idx += 1;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Patches a modified section from its original source, preserving anchors and aliases.
+///
+/// Instead of re-serializing the entire section (which would lose anchors/aliases),
+/// this finds modified leaf values and replaces them in-place on their original lines.
+/// New scalar keys are inserted at the end of their parent container. New comments
+/// are inserted at the correct position based on their sibling ordering.
+///
+/// Returns `None` if the modification cannot be handled by line-patching (e.g.,
+/// new container values or other complex structural changes),
+/// signaling the caller to fall back to `serialize_section()`.
+fn patch_section_from_source(
+    node: &YamlNode,
+    lines: &[&str],
+    key_line: usize,
+    end_line: usize,
+) -> Option<String> {
+    // Collect modified leaf values with their key paths
+    let mut modified = Vec::new();
+    let mut path = Vec::new();
+    collect_modified_leaves(node, &mut path, &mut modified);
+
+    // Work with section lines as owned strings for mutation
+    let mut section_lines: Vec<String> = lines[key_line..end_line]
+        .iter()
+        .map(|l| l.to_string())
+        .collect();
+
+    // Collect new comment insertions
+    let mut comment_insertions = Vec::new();
+    let mut comment_path = Vec::new();
+    collect_new_comment_insertions(
+        node,
+        &mut comment_path,
+        &section_lines,
+        &mut comment_insertions,
+    );
+
+    if modified.is_empty() && comment_insertions.is_empty() {
+        // No modifications found — return original lines
+        let section_text: String = lines[key_line..end_line].join("\n");
+        return Some(section_text);
+    }
+
+    // If any modified value is a container, it's a structural change we can't patch
+    for (_, mod_node) in &modified {
+        if matches!(mod_node.value(), YamlValue::Object(_) | YamlValue::Array(_)) {
+            return None;
+        }
+    }
+
+    // Separate modifications into value edits and new key insertions
+    let mut value_edits = Vec::new();
+    let mut key_insertions = Vec::new();
+
+    for (key_path, mod_node) in &modified {
+        if let Some(line_offset) = find_value_line_in_section(&section_lines, key_path, 0) {
+            value_edits.push((line_offset, *mod_node));
+        } else {
+            // New key — check it's an object key, not an array item
+            let key_name = key_path.last()?;
+            if key_name.starts_with('[') {
+                return None; // Can't insert array items via line patching
+            }
+            key_insertions.push((key_path.clone(), *mod_node));
+        }
+    }
+
+    // Apply value edits first (doesn't change line numbers)
+    for (line_offset, mod_node) in &value_edits {
+        let new_value = format_node_value_for_yaml(mod_node);
+        section_lines[*line_offset] =
+            replace_value_on_line(&section_lines[*line_offset], &new_value)?;
+    }
+
+    // Collect all insertions (keys + comments) with their positions
+    let mut all_insertions: Vec<(usize, String)> = Vec::new();
+
+    // Key insertions
+    for (key_path, mod_node) in &key_insertions {
+        let key_name = key_path.last()?;
+        let parent_path = &key_path[..key_path.len() - 1];
+        let (insert_pos, indent) = find_insertion_point_and_indent(&section_lines, parent_path, 0)?;
+        let new_value = format_node_value_for_yaml(mod_node);
+        let new_line = format!("{}{}: {}", indent, key_name, new_value);
+        all_insertions.push((insert_pos, new_line));
+    }
+
+    // Comment insertions
+    all_insertions.extend(comment_insertions);
+
+    // Sort by position descending so later inserts don't shift earlier positions
+    all_insertions.sort_by(|a, b| b.0.cmp(&a.0));
+    for (pos, line) in all_insertions {
+        section_lines.insert(pos, line);
+    }
+
+    Some(section_lines.join("\n"))
+}
+
 /// Saves YAML with section-level format preservation.
 ///
 /// For root Objects, preserves original source text for unmodified top-level
@@ -387,12 +882,23 @@ fn save_with_section_preservation(original: &str, tree: &YamlTree) -> Option<Str
                 for line in lines.iter().take(key_line).skip(section.start_line) {
                     result_parts.push(line.to_string());
                 }
-                // Re-serialize the modified section
-                match serialize_section(key, value, tree) {
-                    Ok(serialized) => {
-                        result_parts.push(serialized);
+                // Try anchor-preserving patch for sections with anchors/aliases
+                let patched = if section_has_anchors_or_aliases(value) {
+                    patch_section_from_source(value, &lines, key_line, section.end_line)
+                } else {
+                    None
+                };
+
+                if let Some(patch_result) = patched {
+                    result_parts.push(patch_result);
+                } else {
+                    // Re-serialize the modified section
+                    match serialize_section(key, value, tree) {
+                        Ok(serialized) => {
+                            result_parts.push(serialized);
+                        }
+                        Err(_) => return None, // Fall back to slow path
                     }
-                    Err(_) => return None, // Fall back to slow path
                 }
             }
         } else {
@@ -3048,6 +3554,322 @@ defaults:
         assert!(
             saved.contains("defaults:\n  cpu: \"500m\""),
             "Unmodified section should be preserved. Got:\n{}",
+            saved
+        );
+    }
+
+    // --- Anchor/Alias Serialization Preservation Tests ---
+
+    #[test]
+    fn test_anchor_section_value_edit_preserves_anchors() {
+        use crate::document::parser::parse_yaml_auto;
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let yaml = "defaults:\n  resource_limits: &default_limits\n    cpu: 500m\n    memory: 512Mi\nother:\n  name: test\n";
+        let root = parse_yaml_auto(yaml).unwrap();
+        let mut tree = YamlTree::with_source(root, Some(yaml.to_string()));
+
+        // Modify cpu value within defaults section (which has &default_limits anchor)
+        if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
+            if let YamlValue::Object(ref mut defaults) =
+                root_entries.get_mut("defaults").unwrap().value_mut()
+            {
+                if let YamlValue::Object(ref mut limits) =
+                    defaults.get_mut("resource_limits").unwrap().value_mut()
+                {
+                    *limits.get_mut("cpu").unwrap().value_mut() =
+                        YamlValue::String(YamlString::Plain("600m".to_string()));
+                }
+            }
+        }
+
+        let config = Config::default();
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        assert!(
+            saved.contains("&default_limits"),
+            "Anchor should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("cpu: 600m"),
+            "Modified value should be updated. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("memory: 512Mi"),
+            "Unmodified value should be preserved. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_alias_section_value_edit_preserves_aliases() {
+        use crate::document::parser::parse_yaml_auto;
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let yaml = "defaults: &cfg\n  timeout: 30\n  retries: 3\nproduction:\n  settings: *cfg\n  replicas: 3\n";
+        let root = parse_yaml_auto(yaml).unwrap();
+        let mut tree = YamlTree::with_source(root, Some(yaml.to_string()));
+
+        // Modify replicas in production section (which has *cfg alias)
+        if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
+            if let YamlValue::Object(ref mut prod) =
+                root_entries.get_mut("production").unwrap().value_mut()
+            {
+                *prod.get_mut("replicas").unwrap().value_mut() =
+                    YamlValue::Number(YamlNumber::Integer(5));
+            }
+        }
+
+        let config = Config::default();
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        assert!(
+            saved.contains("*cfg"),
+            "Alias should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("replicas: 5"),
+            "Modified value should be updated. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_anchor_section_structural_change_falls_back() {
+        use crate::document::parser::parse_yaml_auto;
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let yaml = "defaults: &cfg\n  timeout: 30\n  retries: 3\nother:\n  name: test\n";
+        let root = parse_yaml_auto(yaml).unwrap();
+        let mut tree = YamlTree::with_source(root, Some(yaml.to_string()));
+
+        // Add a new key to defaults section (structural change)
+        if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
+            if let YamlValue::Object(ref mut defaults) =
+                root_entries.get_mut("defaults").unwrap().value_mut()
+            {
+                defaults.insert(
+                    "max_connections".to_string(),
+                    YamlNode::new(YamlValue::Number(YamlNumber::Integer(100))),
+                );
+            }
+        }
+
+        let config = Config::default();
+        let temp_file = NamedTempFile::new().unwrap();
+        // Should not crash — falls back to serialize_section
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Verify the content is valid YAML
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        assert_eq!(parsed["defaults"]["timeout"], 30);
+        assert_eq!(parsed["defaults"]["max_connections"], 100);
+    }
+
+    #[test]
+    fn test_merge_key_preserved_on_sibling_edit() {
+        use crate::document::parser::parse_yaml_auto;
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let yaml =
+            "defaults: &cfg\n  timeout: 30\n  retries: 3\nproduction:\n  <<: *cfg\n  replicas: 5\n";
+        let root = parse_yaml_auto(yaml).unwrap();
+        let mut tree = YamlTree::with_source(root, Some(yaml.to_string()));
+
+        // Modify replicas (sibling of <<: *cfg merge key)
+        if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
+            if let YamlValue::Object(ref mut prod) =
+                root_entries.get_mut("production").unwrap().value_mut()
+            {
+                *prod.get_mut("replicas").unwrap().value_mut() =
+                    YamlValue::Number(YamlNumber::Integer(10));
+            }
+        }
+
+        let config = Config::default();
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        assert!(
+            saved.contains("<<: *cfg"),
+            "Merge key should be preserved. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("replicas: 10"),
+            "Modified value should be updated. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_unmodified_anchor_section_verbatim() {
+        use crate::document::parser::parse_yaml_auto;
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let yaml = "defaults:\n  resource_limits: &default_limits\n    cpu: 500m\n    memory: 512Mi\napplication:\n  name: test\n  debug: false\n";
+        let root = parse_yaml_auto(yaml).unwrap();
+        let mut tree = YamlTree::with_source(root, Some(yaml.to_string()));
+
+        // Modify a value in a DIFFERENT section (application, not defaults)
+        if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
+            if let YamlValue::Object(ref mut app) =
+                root_entries.get_mut("application").unwrap().value_mut()
+            {
+                *app.get_mut("name").unwrap().value_mut() =
+                    YamlValue::String(YamlString::Plain("new-name".to_string()));
+            }
+        }
+
+        let config = Config::default();
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // The defaults section (with anchors) should be byte-identical
+        assert!(
+            saved.contains(
+                "defaults:\n  resource_limits: &default_limits\n    cpu: 500m\n    memory: 512Mi"
+            ),
+            "Unmodified anchor section should be preserved verbatim. Got:\n{}",
+            saved
+        );
+        assert!(
+            saved.contains("name: new-name"),
+            "Modified section should reflect changes. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_anchor_section_key_addition_preserves_anchors() {
+        use crate::document::parser::parse_yaml_auto;
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let yaml = "defaults:\n  resource_limits: &default_limits\n    cpu: 500m\n    memory: 512Mi\n  health_check: &default_health\n    enabled: true\nservices:\n  resources:\n    requests: *default_limits\n    limits:\n      cpu: 1500m\n";
+        let root = parse_yaml_auto(yaml).unwrap();
+        let mut tree = YamlTree::with_source(root, Some(yaml.to_string()));
+
+        // Add a new key to services.resources (structural change in a section with aliases)
+        if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
+            if let YamlValue::Object(ref mut services) =
+                root_entries.get_mut("services").unwrap().value_mut()
+            {
+                if let YamlValue::Object(ref mut resources) =
+                    services.get_mut("resources").unwrap().value_mut()
+                {
+                    resources.insert(
+                        "name".to_string(),
+                        YamlNode::new(YamlValue::String(YamlString::Plain("foo".to_string()))),
+                    );
+                }
+            }
+        }
+
+        let config = Config::default();
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Alias should be preserved (not resolved to inline values)
+        assert!(
+            saved.contains("*default_limits"),
+            "Alias should be preserved after key addition. Got:\n{}",
+            saved
+        );
+        // New key should be present
+        assert!(
+            saved.contains("name: foo"),
+            "New key should be inserted. Got:\n{}",
+            saved
+        );
+        // Anchor section should be untouched
+        assert!(
+            saved.contains("&default_limits"),
+            "Anchor should be preserved. Got:\n{}",
+            saved
+        );
+    }
+
+    #[test]
+    fn test_anchor_section_comment_addition_preserves_anchors() {
+        use crate::document::node::CommentNode;
+        use crate::document::parser::parse_yaml_auto;
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let yaml = "defaults:\n  resource_limits: &default_limits\n    cpu: 500m\n    memory: 512Mi\nservices:\n  - name: api-gateway\n    resources:\n      requests: *default_limits          # alias reuse\n      limits:\n        cpu: 1500m\n        memory: 1Gi\n";
+        let root = parse_yaml_auto(yaml).unwrap();
+        let mut tree = YamlTree::with_source(root, Some(yaml.to_string()));
+
+        // Add a comment between requests and limits inside services[0].resources
+        if let YamlValue::Object(ref mut root_entries) = tree.root_mut().value_mut() {
+            if let YamlValue::Array(ref mut services) =
+                root_entries.get_mut("services").unwrap().value_mut()
+            {
+                if let YamlValue::Object(ref mut svc) = services[0].value_mut() {
+                    if let YamlValue::Object(ref mut resources) =
+                        svc.get_mut("resources").unwrap().value_mut()
+                    {
+                        // Insert a new comment entry between existing keys
+                        let comment = CommentNode::new(
+                            "==================".to_string(),
+                            CommentPosition::Above,
+                        );
+                        // Insert at index 1 (after "requests", before "limits")
+                        resources.insert(
+                            "__comment_new__".to_string(),
+                            YamlNode::new(YamlValue::Comment(comment)),
+                        );
+                        // Move it to the right position (after requests)
+                        resources.move_index(resources.len() - 1, 1);
+                    }
+                }
+            }
+        }
+
+        let config = Config::default();
+        let temp_file = NamedTempFile::new().unwrap();
+        save_yaml_file(temp_file.path(), &tree, &config).unwrap();
+        let saved = fs::read_to_string(temp_file.path()).unwrap();
+
+        // Alias should be preserved (not resolved to inline values)
+        assert!(
+            saved.contains("*default_limits"),
+            "Alias should be preserved after comment addition. Got:\n{}",
+            saved
+        );
+        // Anchor section should be untouched
+        assert!(
+            saved.contains("&default_limits"),
+            "Anchor should be preserved. Got:\n{}",
+            saved
+        );
+        // New comment should be present
+        assert!(
+            saved.contains("# =================="),
+            "New comment should appear. Got:\n{}",
+            saved
+        );
+        // Inline comment should be preserved
+        assert!(
+            saved.contains("# alias reuse"),
+            "Inline comments should be preserved. Got:\n{}",
             saved
         );
     }

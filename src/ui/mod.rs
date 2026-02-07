@@ -176,7 +176,9 @@ impl UI {
             } else if let Some(buffer) = state.edit_buffer() {
                 // Render edit prompt if in insert mode with active buffer
                 // If we're in AwaitingValue stage with a key, show the key as the prompt
-                let prompt = if matches!(state.add_mode_stage(), AddModeStage::AwaitingValue)
+                let prompt = if matches!(state.add_mode_stage(), AddModeStage::AwaitingComment) {
+                    "Comment: ".to_string()
+                } else if matches!(state.add_mode_stage(), AddModeStage::AwaitingValue)
                     && !state.add_key_buffer().is_empty()
                 {
                     format!("{}: ", state.add_key_buffer())
