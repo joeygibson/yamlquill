@@ -1,11 +1,8 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use ratatui::{backend::TermionBackend, Terminal};
-use std::io::{self, IsTerminal, Write};
+use ratatui::Terminal;
+use std::io::{self, IsTerminal};
 use std::time::Duration;
-use termion::input::MouseTerminal;
-use termion::raw::IntoRawMode;
-use termion::screen::IntoAlternateScreen;
 
 use yamlquill::document::node::{YamlNode, YamlValue};
 use yamlquill::document::tree::YamlTree;
@@ -33,27 +30,115 @@ struct Cli {
 ///
 /// This ensures that panics are visible even when the terminal is in raw mode with alternate screen.
 /// Without this, panic messages would be hidden or garbled, making debugging very difficult.
+#[cfg(feature = "backend-termion")]
 fn setup_panic_hook() {
     use std::panic;
 
-    // Take the default panic hook so we can call it after restoration
     let default_panic = panic::take_hook();
 
     panic::set_hook(Box::new(move |panic_info| {
-        // Restore terminal to normal state
-        // Use stderr to avoid interfering with stdout pipes
         use std::io::Write;
 
         // Exit alternate screen
         let _ = write!(io::stderr(), "{}", termion::screen::ToMainScreen);
         // Show cursor
         let _ = write!(io::stderr(), "{}", termion::cursor::Show);
-        // Ensure output is flushed
         let _ = io::stderr().flush();
 
-        // Call the default panic handler to print the panic message and backtrace
         default_panic(panic_info);
     }));
+}
+
+#[cfg(feature = "backend-crossterm")]
+fn setup_panic_hook() {
+    use std::panic;
+
+    let default_panic = panic::take_hook();
+
+    panic::set_hook(Box::new(move |panic_info| {
+        use crossterm::execute;
+        use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+        use std::io::Write;
+
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stderr(), LeaveAlternateScreen);
+        let _ = io::stderr().flush();
+
+        default_panic(panic_info);
+    }));
+}
+
+#[cfg(feature = "backend-termion")]
+#[allow(clippy::type_complexity)]
+fn setup_terminal() -> Result<
+    Terminal<
+        ratatui::backend::TermionBackend<
+            termion::screen::AlternateScreen<
+                termion::input::MouseTerminal<termion::raw::RawTerminal<io::Stdout>>,
+            >,
+        >,
+    >,
+> {
+    use termion::input::MouseTerminal;
+    use termion::raw::IntoRawMode;
+    use termion::screen::IntoAlternateScreen;
+
+    let stdout = io::stdout()
+        .into_raw_mode()
+        .context("Failed to enable raw mode")?;
+    let stdout = MouseTerminal::from(stdout);
+    let stdout = stdout
+        .into_alternate_screen()
+        .context("Failed to enter alternate screen")?;
+
+    let backend = ratatui::backend::TermionBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
+    Ok(terminal)
+}
+
+#[cfg(feature = "backend-crossterm")]
+fn setup_terminal() -> Result<Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>> {
+    use crossterm::event::EnableMouseCapture;
+    use crossterm::execute;
+    use crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
+
+    enable_raw_mode().context("Failed to enable raw mode")?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+        .context("Failed to enter alternate screen")?;
+
+    let backend = ratatui::backend::CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
+    Ok(terminal)
+}
+
+#[cfg(feature = "backend-termion")]
+fn cleanup_terminal<B: std::io::Write>(
+    terminal: &mut Terminal<ratatui::backend::TermionBackend<B>>,
+) -> Result<()> {
+    use std::io::Write;
+    write!(terminal.backend_mut(), "{}", termion::cursor::Show)?;
+    terminal.backend_mut().flush()?;
+    Ok(())
+}
+
+#[cfg(feature = "backend-crossterm")]
+fn cleanup_terminal(
+    terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
+) -> Result<()> {
+    use crossterm::event::DisableMouseCapture;
+    use crossterm::execute;
+    use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -112,18 +197,7 @@ fn main() -> Result<()> {
     };
 
     // Setup terminal
-    // Termion can use /dev/tty directly when stdin is piped, no redirection needed
-    let stdout = io::stdout()
-        .into_raw_mode()
-        .context("Failed to enable raw mode")?;
-    let stdout = MouseTerminal::from(stdout);
-    let stdout = stdout
-        .into_alternate_screen()
-        .context("Failed to enter alternate screen")?;
-
-    let backend = TermionBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
+    let mut terminal = setup_terminal()?;
 
     // Load config
     use yamlquill::config::Config;
@@ -167,10 +241,7 @@ fn main() -> Result<()> {
     let result = run_event_loop(&mut terminal, &mut ui, &mut input_handler, &mut state);
 
     // Cleanup
-    // Termion handles cleanup automatically through Drop guards
-    // But we still want to show the cursor before exiting
-    write!(terminal.backend_mut(), "{}", termion::cursor::Show)?;
-    terminal.backend_mut().flush()?;
+    cleanup_terminal(&mut terminal)?;
 
     result
 }

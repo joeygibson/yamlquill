@@ -479,10 +479,10 @@ production:
 
 #[test]
 fn test_anchor_navigation() {
-    use termion::event::{Event, Key};
     use yamlquill::document::tree::YamlTree;
     use yamlquill::editor::mode::EditorMode;
     use yamlquill::editor::state::EditorState;
+    use yamlquill::input::backend::{BackendEvent, BackendKey};
     use yamlquill::input::keys::{map_key_event, InputEvent};
 
     let yaml = r#"
@@ -509,7 +509,10 @@ production:
     );
 
     // Simulate pressing Enter
-    let enter_event = map_key_event(Event::Key(Key::Char('\n')), &EditorMode::Normal);
+    let enter_event = map_key_event(
+        BackendEvent::Key(BackendKey::Char('\n')),
+        &EditorMode::Normal,
+    );
     assert_eq!(
         enter_event,
         InputEvent::JumpToAnchor,

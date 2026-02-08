@@ -1,33 +1,19 @@
 //! Input event handler for polling and processing keyboard events.
 
+use super::backend::{BackendEvent, BackendKey, BackendMouse, EventReader};
 use super::keys::{map_key_event, InputEvent};
 use crate::editor::mode::EditorMode;
 use crate::editor::state::EditorState;
-use anyhow::{Context, Result};
-use std::fs::File;
-use std::io::{self, Stdin};
+use anyhow::Result;
 use std::time::Duration;
-use termion::event::{Event, Key, MouseButton, MouseEvent};
-use termion::input::{Events, TermRead};
-
-/// Event source for reading terminal events.
-///
-/// This enum wraps the events iterator to maintain its state across
-/// multiple calls, preventing character loss during rapid input (paste).
-enum EventSource {
-    /// Reading from stdin
-    Stdin(Events<Stdin>),
-    /// Reading from /dev/tty (when stdin was piped)
-    Tty(Events<File>),
-}
 
 /// Handles terminal input events and updates editor state.
 ///
-/// The InputHandler polls for termion events and converts them to
+/// The InputHandler polls for backend events and converts them to
 /// high-level InputEvents, then updates the editor state accordingly.
 pub struct InputHandler {
-    /// Event source iterator (maintains position in input buffer)
-    events: EventSource,
+    /// Backend-specific event reader
+    reader: EventReader,
     /// True if waiting for register name after " key
     awaiting_register: bool,
 }
@@ -44,7 +30,7 @@ impl InputHandler {
     /// ```
     pub fn new() -> Self {
         Self {
-            events: EventSource::Stdin(io::stdin().events()),
+            reader: EventReader::new(),
             awaiting_register: false,
         }
     }
@@ -52,21 +38,15 @@ impl InputHandler {
     /// Creates a new InputHandler that reads from /dev/tty.
     /// Use this when stdin has been consumed for piped data.
     pub fn new_with_tty() -> Result<Self> {
-        let tty_file = File::options()
-            .read(true)
-            .write(true)
-            .open("/dev/tty")
-            .context("Failed to open /dev/tty for keyboard input")?;
-
         Ok(Self {
-            events: EventSource::Tty(tty_file.events()),
+            reader: EventReader::new_with_tty()?,
             awaiting_register: false,
         })
     }
 
     /// Polls for a terminal event with a timeout.
     ///
-    /// Returns Some(Event) if an event occurred, None if timeout elapsed.
+    /// Returns Some(BackendEvent) if an event occurred, None if timeout elapsed.
     ///
     /// # Arguments
     ///
@@ -85,23 +65,8 @@ impl InputHandler {
     /// let mut handler = InputHandler::new();
     /// let event = handler.poll_event(Duration::from_millis(100)).unwrap();
     /// ```
-    pub fn poll_event(&mut self, _timeout: Duration) -> Result<Option<Event>> {
-        // Use the stored events iterator to maintain position in the input buffer.
-        // This prevents character loss during rapid input (paste operations).
-        match &mut self.events {
-            EventSource::Stdin(events) => {
-                if let Some(event_result) = events.next() {
-                    return Ok(Some(event_result?));
-                }
-            }
-            EventSource::Tty(events) => {
-                if let Some(event_result) = events.next() {
-                    return Ok(Some(event_result?));
-                }
-            }
-        }
-
-        Ok(None)
+    pub fn poll_event(&mut self, _timeout: Duration) -> Result<Option<BackendEvent>> {
+        self.reader.poll_event()
     }
 
     /// Handles a terminal event and updates editor state.
@@ -111,7 +76,7 @@ impl InputHandler {
     ///
     /// # Arguments
     ///
-    /// * `event` - The termion Event to handle
+    /// * `event` - The BackendEvent to handle
     /// * `state` - The editor state to update
     ///
     /// # Returns
@@ -129,19 +94,19 @@ impl InputHandler {
     /// use yamlquill::editor::state::EditorState;
     /// use yamlquill::document::tree::YamlTree;
     /// use yamlquill::document::node::{YamlNode, YamlValue};
-    /// use termion::event::{Event, Key};
+    /// use yamlquill::input::backend::{BackendEvent, BackendKey};
     ///
     /// let mut handler = InputHandler::new();
     /// let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
     /// let mut state = EditorState::new_with_default_theme(tree);
-    /// let event = Event::Key(Key::Char('q'));
+    /// let event = BackendEvent::Key(BackendKey::Char('q'));
     /// let should_quit = handler.handle_event(event, &mut state).unwrap();
     /// assert!(should_quit);
     /// ```
-    pub fn handle_event(&mut self, event: Event, state: &mut EditorState) -> Result<bool> {
+    pub fn handle_event(&mut self, event: BackendEvent, state: &mut EditorState) -> Result<bool> {
         // Handle register selection if awaiting register
         if self.awaiting_register {
-            if let Event::Key(Key::Char(c)) = event {
+            if let BackendEvent::Key(BackendKey::Char(c)) = event {
                 // Check if it's a valid register (a-z, A-Z, 0-9, ")
                 if c.is_ascii_alphanumeric() || c == '"' {
                     // Uppercase letters enable append mode
@@ -162,7 +127,7 @@ impl InputHandler {
         // Handle mark setting if waiting for mark name after 'm'
         if state.pending_mark_set() {
             state.set_pending_mark_set(false);
-            if let Event::Key(Key::Char(c)) = event {
+            if let BackendEvent::Key(BackendKey::Char(c)) = event {
                 if c.is_ascii_lowercase() {
                     use crate::editor::state::MessageLevel;
                     state.set_mark(c);
@@ -179,7 +144,7 @@ impl InputHandler {
         // Handle mark jumping if waiting for mark name after '\''
         if state.pending_mark_jump() {
             state.set_pending_mark_jump(false);
-            if let Event::Key(Key::Char(c)) = event {
+            if let BackendEvent::Key(BackendKey::Char(c)) = event {
                 if c.is_ascii_lowercase() {
                     use crate::editor::state::MessageLevel;
 
@@ -242,49 +207,41 @@ impl InputHandler {
         }
 
         // Handle mouse events if mouse is enabled
-        if let Event::Mouse(mouse_event) = event {
+        if let BackendEvent::Mouse(ref mouse_event) = event {
             if state.enable_mouse() {
                 // Check if help is shown - mouse scrolls help overlay
                 if state.show_help() {
                     match mouse_event {
-                        MouseEvent::Press(MouseButton::WheelUp, _, _) => {
+                        BackendMouse::WheelUp => {
                             // Scroll help up 3 lines
                             for _ in 0..3 {
                                 state.scroll_help_up();
                             }
                             return Ok(false);
                         }
-                        MouseEvent::Press(MouseButton::WheelDown, _, _) => {
+                        BackendMouse::WheelDown => {
                             // Scroll help down 3 lines
                             for _ in 0..3 {
                                 state.scroll_help_down();
                             }
                             return Ok(false);
                         }
-                        _ => {
-                            // Ignore other mouse events
-                            return Ok(false);
-                        }
                     }
                 } else {
                     // Help not shown - scroll main viewport
                     match mouse_event {
-                        MouseEvent::Press(MouseButton::WheelUp, _, _) => {
+                        BackendMouse::WheelUp => {
                             // Scroll up 3 lines
                             for _ in 0..3 {
                                 state.move_cursor_up();
                             }
                             return Ok(false);
                         }
-                        MouseEvent::Press(MouseButton::WheelDown, _, _) => {
+                        BackendMouse::WheelDown => {
                             // Scroll down 3 lines
                             for _ in 0..3 {
                                 state.move_cursor_down();
                             }
-                            return Ok(false);
-                        }
-                        _ => {
-                            // Ignore other mouse events (clicks, etc.)
                             return Ok(false);
                         }
                     }
@@ -294,11 +251,11 @@ impl InputHandler {
             return Ok(false);
         }
 
-        if let Event::Key(key) = event {
+        if let BackendEvent::Key(key) = event {
             // Handle insert mode separately for character input
             if *state.mode() == EditorMode::Insert {
                 match key {
-                    Key::Char('\n') => {
+                    BackendKey::Char('\n') => {
                         // Check if we're in rename mode
                         if state.is_renaming_key() {
                             // Commit rename operation
@@ -378,39 +335,39 @@ impl InputHandler {
                         }
                         return Ok(false);
                     }
-                    Key::Char(c) => {
+                    BackendKey::Char(c) => {
                         state.push_to_edit_buffer(c);
                         return Ok(false);
                     }
-                    Key::Backspace => {
+                    BackendKey::Backspace => {
                         state.pop_from_edit_buffer();
                         return Ok(false);
                     }
-                    Key::Left => {
+                    BackendKey::Left => {
                         state.edit_cursor_left();
                         return Ok(false);
                     }
-                    Key::Right => {
+                    BackendKey::Right => {
                         state.edit_cursor_right();
                         return Ok(false);
                     }
-                    Key::Ctrl('a') => {
+                    BackendKey::Ctrl('a') => {
                         state.edit_cursor_home();
                         return Ok(false);
                     }
-                    Key::Ctrl('e') => {
+                    BackendKey::Ctrl('e') => {
                         state.edit_cursor_end();
                         return Ok(false);
                     }
-                    Key::Ctrl('d') => {
+                    BackendKey::Ctrl('d') => {
                         state.edit_delete_at_cursor();
                         return Ok(false);
                     }
-                    Key::Ctrl('k') => {
+                    BackendKey::Ctrl('k') => {
                         state.edit_kill_to_end();
                         return Ok(false);
                     }
-                    Key::Esc => {
+                    BackendKey::Esc => {
                         // Check if we're in rename mode
                         if state.is_renaming_key() {
                             // Cancel rename operation
@@ -448,23 +405,23 @@ impl InputHandler {
             // Handle command mode separately for character input
             if *state.mode() == EditorMode::Command {
                 match key {
-                    Key::Char('\n') => {
+                    BackendKey::Char('\n') => {
                         // Execute command and return to normal mode
                         let command = state.command_buffer().to_string();
                         state.clear_command_buffer();
                         state.set_mode(EditorMode::Normal);
                         return self.execute_command(&command, state);
                     }
-                    Key::Char('\t') => {
+                    BackendKey::Char('\t') => {
                         // Tab completion
                         state.handle_tab_completion();
                         return Ok(false);
                     }
-                    Key::Char(c) => {
+                    BackendKey::Char(c) => {
                         state.push_to_command_buffer(c);
                         return Ok(false);
                     }
-                    Key::Backspace => {
+                    BackendKey::Backspace => {
                         state.pop_from_command_buffer();
                         // Exit command mode if buffer is now empty
                         if state.command_buffer().is_empty() {
@@ -472,7 +429,7 @@ impl InputHandler {
                         }
                         return Ok(false);
                     }
-                    Key::Esc => {
+                    BackendKey::Esc => {
                         state.clear_command_buffer();
                         state.set_mode(EditorMode::Normal);
                         return Ok(false);
@@ -484,7 +441,7 @@ impl InputHandler {
             // Handle search mode separately for character input
             if *state.mode() == EditorMode::Search {
                 match key {
-                    Key::Char('\n') => {
+                    BackendKey::Char('\n') => {
                         // Exit search mode
                         state.set_mode(EditorMode::Normal);
                         use crate::editor::state::MessageLevel;
@@ -499,17 +456,17 @@ impl InputHandler {
                         }
                         return Ok(false);
                     }
-                    Key::Char(c) => {
+                    BackendKey::Char(c) => {
                         state.push_to_search_buffer(c);
                         state.execute_search();
                         return Ok(false);
                     }
-                    Key::Backspace => {
+                    BackendKey::Backspace => {
                         state.pop_from_search_buffer();
                         state.execute_search();
                         return Ok(false);
                     }
-                    Key::Esc => {
+                    BackendKey::Esc => {
                         state.clear_search_buffer();
                         state.set_mode(EditorMode::Normal);
                         return Ok(false);
@@ -521,19 +478,19 @@ impl InputHandler {
             // If theme picker is shown, handle navigation and selection
             if state.show_theme_picker() {
                 match key {
-                    Key::Up | Key::Char('k') => {
+                    BackendKey::Up | BackendKey::Char('k') => {
                         state.theme_picker_previous();
                         return Ok(false);
                     }
-                    Key::Down | Key::Char('j') => {
+                    BackendKey::Down | BackendKey::Char('j') => {
                         state.theme_picker_next();
                         return Ok(false);
                     }
-                    Key::Char('\n') => {
+                    BackendKey::Char('\n') => {
                         state.theme_picker_apply();
                         return Ok(false);
                     }
-                    Key::Esc | Key::Char('q') => {
+                    BackendKey::Esc | BackendKey::Char('q') => {
                         state.theme_picker_cancel();
                         return Ok(false);
                     }
@@ -547,15 +504,15 @@ impl InputHandler {
             // If help is shown, handle scrolling and closing
             if state.show_help() {
                 match key {
-                    Key::Esc | Key::F(1) => {
+                    BackendKey::Esc | BackendKey::F(1) => {
                         state.toggle_help();
                         return Ok(false);
                     }
-                    Key::Down | Key::Char('j') => {
+                    BackendKey::Down | BackendKey::Char('j') => {
                         state.scroll_help_down();
                         return Ok(false);
                     }
-                    Key::Up | Key::Char('k') => {
+                    BackendKey::Up | BackendKey::Char('k') => {
                         state.scroll_help_up();
                         return Ok(false);
                     }
@@ -568,7 +525,7 @@ impl InputHandler {
 
             // Handle digit input in Normal mode for count prefix
             if *state.mode() == EditorMode::Normal {
-                if let Key::Char(c) = key {
+                if let BackendKey::Char(c) = key {
                     if c.is_ascii_digit() {
                         let digit = c.to_digit(10).unwrap();
                         // '0' can only be part of count if count already started
@@ -707,7 +664,7 @@ impl InputHandler {
                 use crate::editor::state::AddModeStage;
                 if matches!(state.add_mode_stage(), &AddModeStage::AwaitingKey) {
                     match key {
-                        Key::Char('\n') => {
+                        BackendKey::Char('\n') => {
                             // Enter pressed - check if this is a container add or scalar add
                             // Container adds have the node stored in temp_container
                             if state.has_temp_container() {
@@ -731,7 +688,7 @@ impl InputHandler {
                             }
                             return Ok(false);
                         }
-                        Key::Char(c) if c.is_ascii() && !c.is_control() => {
+                        BackendKey::Char(c) if c.is_ascii() && !c.is_control() => {
                             // Regular character - add to key buffer
                             // Clear message on first input to show clean key entry area
                             if state.add_key_buffer().is_empty() {
@@ -740,12 +697,12 @@ impl InputHandler {
                             state.push_to_add_key_buffer(c);
                             return Ok(false);
                         }
-                        Key::Backspace => {
+                        BackendKey::Backspace => {
                             // Backspace - remove from key buffer
                             state.pop_from_add_key_buffer();
                             return Ok(false);
                         }
-                        Key::Esc => {
+                        BackendKey::Esc => {
                             // Escape - cancel add operation
                             state.cancel_add_operation();
                             state.set_mode(EditorMode::Normal);
@@ -759,7 +716,7 @@ impl InputHandler {
                 }
             }
 
-            let input_event = map_key_event(Event::Key(key), state.mode());
+            let input_event = map_key_event(BackendEvent::Key(key), state.mode());
 
             match input_event {
                 InputEvent::Quit => {
@@ -1899,7 +1856,6 @@ mod tests {
     use crate::document::node::{YamlNode, YamlNumber, YamlString, YamlValue};
     use crate::document::tree::YamlTree;
     use crate::editor::mode::EditorMode;
-    use termion::event::Key;
 
     #[test]
     fn test_handler_creation() {
@@ -1912,7 +1868,7 @@ mod tests {
         let mut handler = InputHandler::new();
         let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
-        let event = Event::Key(Key::Char('q'));
+        let event = BackendEvent::Key(BackendKey::Char('q'));
 
         let should_quit = handler.handle_event(event, &mut state).unwrap();
         assert!(should_quit);
@@ -1927,7 +1883,7 @@ mod tests {
         // Mark the file as dirty
         state.mark_dirty();
 
-        let event = Event::Key(Key::Char('q'));
+        let event = BackendEvent::Key(BackendKey::Char('q'));
         let should_quit = handler.handle_event(event, &mut state).unwrap();
 
         // Should NOT quit when file is dirty
@@ -1948,7 +1904,7 @@ mod tests {
         let mut state = EditorState::new_with_default_theme(tree);
         assert_eq!(*state.mode(), EditorMode::Normal);
 
-        let event = Event::Key(Key::Char('e'));
+        let event = BackendEvent::Key(BackendKey::Char('e'));
         let should_quit = handler.handle_event(event, &mut state).unwrap();
 
         assert!(!should_quit);
@@ -1961,7 +1917,7 @@ mod tests {
         let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
 
-        let event = Event::Key(Key::Char(':'));
+        let event = BackendEvent::Key(BackendKey::Char(':'));
         handler.handle_event(event, &mut state).unwrap();
 
         assert_eq!(*state.mode(), EditorMode::Command);
@@ -1974,7 +1930,7 @@ mod tests {
         let mut state = EditorState::new_with_default_theme(tree);
         state.set_mode(EditorMode::Insert);
 
-        let event = Event::Key(Key::Esc);
+        let event = BackendEvent::Key(BackendKey::Esc);
         handler.handle_event(event, &mut state).unwrap();
 
         assert_eq!(*state.mode(), EditorMode::Normal);
@@ -1986,7 +1942,7 @@ mod tests {
         let tree = YamlTree::new(YamlNode::new(YamlValue::Null));
         let mut state = EditorState::new_with_default_theme(tree);
 
-        let event = Event::Key(Key::Char('j'));
+        let event = BackendEvent::Key(BackendKey::Char('j'));
         let should_quit = handler.handle_event(event, &mut state).unwrap();
 
         assert!(!should_quit);
@@ -2014,7 +1970,7 @@ mod tests {
         state.set_command_buffer(format!("w {}", file_path_str));
 
         // Execute the command by simulating Enter key
-        let event = Event::Key(Key::Char('\n'));
+        let event = BackendEvent::Key(BackendKey::Char('\n'));
         let result = handler.handle_event(event, &mut state);
         assert!(result.is_ok());
         assert!(!result.unwrap()); // should_quit = false
@@ -2059,7 +2015,7 @@ mod tests {
         state.set_command_buffer(format!("wq {}", file_path_str));
 
         // Execute the command - should save and quit
-        let event = Event::Key(Key::Char('\n'));
+        let event = BackendEvent::Key(BackendKey::Char('\n'));
         let result = handler.handle_event(event, &mut state);
         assert!(result.is_ok());
         assert!(result.unwrap()); // should_quit = true

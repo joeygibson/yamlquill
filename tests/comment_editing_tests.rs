@@ -3,18 +3,18 @@
 //! These tests verify that comments can be added, edited, and deleted using
 //! vim-style keybindings with proper integration into undo/redo system.
 
-use termion::event::{Event, Key};
 use yamlquill::document::node::{CommentNode, CommentPosition, YamlNode, YamlValue};
 use yamlquill::document::parser::parse_yaml_auto;
 use yamlquill::document::tree::YamlTree;
 use yamlquill::editor::mode::EditorMode;
 use yamlquill::editor::state::EditorState;
+use yamlquill::input::backend::{BackendEvent, BackendKey};
 use yamlquill::input::keys::{map_key_event, InputEvent};
 
 /// Test 1: 'c' key maps to AddComment event in Normal mode
 #[test]
 fn test_c_key_maps_to_add_comment() {
-    let event = Event::Key(Key::Char('c'));
+    let event = BackendEvent::Key(BackendKey::Char('c'));
     let input_event = map_key_event(event, &EditorMode::Normal);
     assert_eq!(input_event, InputEvent::AddComment);
 }
@@ -37,7 +37,7 @@ age: 30
     // Simulate pressing 'c' key - should trigger position prompt
     // Note: This will be tested through integration once implemented
     // For now, just verify the key maps correctly
-    let event = Event::Key(Key::Char('c'));
+    let event = BackendEvent::Key(BackendKey::Char('c'));
     let input_event = map_key_event(event, state.mode());
     assert_eq!(input_event, InputEvent::AddComment);
 }
@@ -59,7 +59,7 @@ name: Alice
     state.move_cursor_down();
 
     // Pressing 'e' should enter insert mode for editing the comment
-    let event = Event::Key(Key::Char('e'));
+    let event = BackendEvent::Key(BackendKey::Char('e'));
     let input_event = map_key_event(event, state.mode());
     assert_eq!(input_event, InputEvent::EnterInsertMode);
 }
@@ -80,7 +80,7 @@ name: Alice
     state.move_cursor_down();
 
     // Simulate 'dd' - first 'd' maps to Delete
-    let event = Event::Key(Key::Char('d'));
+    let event = BackendEvent::Key(BackendKey::Char('d'));
     let input_event = map_key_event(event, state.mode());
     assert_eq!(input_event, InputEvent::Delete);
 
@@ -191,7 +191,7 @@ name: Alice
     // 4. Verify comment is removed (count returns to initial)
 
     // For now, just verify undo key mapping works
-    let event = Event::Key(Key::Char('u'));
+    let event = BackendEvent::Key(BackendKey::Char('u'));
     let input_event = map_key_event(event, state.mode());
     assert_eq!(input_event, InputEvent::Undo);
 }
@@ -214,7 +214,7 @@ name: Alice
     // 4. Verify comment is back
 
     // For now, verify redo key mapping
-    let event = Event::Key(Key::Ctrl('r'));
+    let event = BackendEvent::Key(BackendKey::Ctrl('r'));
     let input_event = map_key_event(event, state.mode());
     assert_eq!(input_event, InputEvent::Redo);
 }

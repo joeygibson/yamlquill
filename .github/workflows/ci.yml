@@ -25,16 +25,19 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        rust: [stable]
+        include:
+          - os: ubuntu-latest
+            features: ""
+          - os: macos-latest
+            features: ""
+          - os: windows-latest
+            features: "--no-default-features --features backend-crossterm"
 
     steps:
     - uses: actions/checkout@v4
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: ${{ matrix.rust }}
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -55,10 +58,10 @@ jobs:
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose ${{ matrix.features }}
 
     - name: Run clippy
-      run: cargo clippy -- -D warnings
+      run: cargo clippy ${{ matrix.features }} -- -D warnings
 
     - name: Check formatting
       run: cargo fmt -- --check
@@ -71,8 +74,13 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            features: ""
           - os: macos-latest
             target: x86_64-apple-darwin
+            features: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: "--no-default-features --features backend-crossterm"
 
     steps:
     - uses: actions/checkout@v4
@@ -80,8 +88,7 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
         targets: ${{ matrix.target }}
 
     - name: Build release binary
-      run: cargo build --release --target ${{ matrix.target }}
+      run: cargo build --release --target ${{ matrix.target }} ${{ matrix.features }}
