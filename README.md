@@ -10,6 +10,10 @@
 
 A terminal-based structural YAML editor with vim-style keybindings.
 
+<p align="center">
+  <img src="assets/demo.gif" width="800" height="600"/>
+</p>
+
 ## Status
 
 [![CI](https://github.com/joeygibson/yamlquill/workflows/CI/badge.svg)](https://github.com/joeygibson/yamlquill/actions/workflows/ci.yml)
