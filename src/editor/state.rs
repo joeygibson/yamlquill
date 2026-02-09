@@ -42,6 +42,7 @@
 //! ```
 
 use super::cursor::Cursor;
+use super::history::InputHistory;
 use super::jumplist::JumpList;
 use super::marks::MarkSet;
 use super::mode::EditorMode;
@@ -254,6 +255,9 @@ pub struct EditorState {
     visual_anchor: Option<Vec<usize>>,
     visual_selection: Vec<Vec<usize>>,
     last_command: Option<RepeatableCommand>,
+    // Command and search history
+    command_history: InputHistory,
+    search_history: InputHistory,
 }
 
 impl EditorState {
@@ -360,6 +364,8 @@ impl EditorState {
             visual_anchor: None,
             visual_selection: Vec::new(),
             last_command: None,
+            command_history: InputHistory::new(50),
+            search_history: InputHistory::new(50),
         }
     }
 
@@ -1702,6 +1708,43 @@ impl EditorState {
         self.reset_completion();
     }
 
+    /// Browses up (older) in command history, updating the command buffer.
+    ///
+    /// Returns true if the buffer was changed.
+    pub fn command_history_up(&mut self) -> bool {
+        let current = self.command_buffer.clone();
+        if let Some(entry) = self.command_history.browse_up(&current) {
+            self.command_buffer = entry.to_string();
+            self.reset_completion();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Browses down (newer) in command history, updating the command buffer.
+    ///
+    /// Returns true if the buffer was changed.
+    pub fn command_history_down(&mut self) -> bool {
+        if let Some(entry) = self.command_history.browse_down() {
+            self.command_buffer = entry.to_string();
+            self.reset_completion();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Pushes a command to the command history.
+    pub fn push_command_history(&mut self, command: String) {
+        self.command_history.push(command);
+    }
+
+    /// Resets command history browse state.
+    pub fn reset_command_history_browse(&mut self) {
+        self.command_history.reset_browse();
+    }
+
     /// Handles tab-completion for command mode.
     ///
     /// Generates completion candidates based on the current command buffer
@@ -2550,6 +2593,41 @@ impl EditorState {
     pub fn clear_search_buffer(&mut self) {
         self.search_buffer.clear();
         self.search_type = None;
+    }
+
+    /// Browses up (older) in search history, updating the search buffer.
+    ///
+    /// Returns true if the buffer was changed.
+    pub fn search_history_up(&mut self) -> bool {
+        let current = self.search_buffer.clone();
+        if let Some(entry) = self.search_history.browse_up(&current) {
+            self.search_buffer = entry.to_string();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Browses down (newer) in search history, updating the search buffer.
+    ///
+    /// Returns true if the buffer was changed.
+    pub fn search_history_down(&mut self) -> bool {
+        if let Some(entry) = self.search_history.browse_down() {
+            self.search_buffer = entry.to_string();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Pushes a query to the search history.
+    pub fn push_search_history(&mut self, query: String) {
+        self.search_history.push(query);
+    }
+
+    /// Resets search history browse state.
+    pub fn reset_search_history_browse(&mut self) {
+        self.search_history.reset_browse();
     }
 
     /// Sets the search direction.
