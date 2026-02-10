@@ -194,8 +194,8 @@ impl TreeViewState {
             let path = vec![idx];
             let is_expanded = self.is_expanded(&path);
 
-            // Show collapsed preview for the line itself
-            let preview = format_collapsed_preview(node, 60);
+            // Show collapsed preview for the line itself (large max to fill terminal width)
+            let preview = format_collapsed_preview(node, 500);
             // Add anchor badge if present
             let preview = self.add_anchor_badge(preview, node);
             self.lines.push(TreeViewLine {
@@ -290,9 +290,9 @@ impl TreeViewState {
                     // For comments, hide the key and show content in preview
                     let display_key = if is_comment { None } else { Some(key.clone()) };
 
-                    // Always use collapsed preview for containers
+                    // Always use collapsed preview for containers (large max to fill terminal width)
                     let value_preview = if child.value().is_container() {
-                        format_collapsed_preview(child, 60)
+                        format_collapsed_preview(child, 500)
                     } else {
                         self.get_value_preview(child.value())
                     };
@@ -320,9 +320,9 @@ impl TreeViewState {
                         path.iter().copied().chain(std::iter::once(i)).collect();
                     let expanded = self.is_expanded(&child_path);
 
-                    // Always use collapsed preview for containers
+                    // Always use collapsed preview for containers (large max to fill terminal width)
                     let value_preview = if child.value().is_container() {
-                        format_collapsed_preview(child, 60)
+                        format_collapsed_preview(child, 500)
                     } else {
                         self.get_value_preview(child.value())
                     };
@@ -769,9 +769,9 @@ fn format_number_yaml(n: &crate::document::node::YamlNumber) -> String {
     }
 }
 
-/// Formats a collapsed preview of a JSON node similar to jless.
+/// Formats a collapsed preview of a YAML node.
 ///
-/// Format: (N) {key1: val1, key2: val2, ...} for objects
+/// Format: (N) key1: val1, key2: val2, ... for objects
 ///         (N) [elem1, elem2, ...] for arrays
 ///
 /// Truncates at max_chars with "..." if needed.
@@ -797,18 +797,16 @@ fn format_collapsed_object(
     max_chars: usize,
 ) -> String {
     if fields.is_empty() {
-        return "{…}".to_string();
+        return "(0)".to_string();
     }
 
     let count = fields.len();
-    let mut preview = format!("({}) {{", count);
-    let mut truncated = false;
+    let mut preview = format!("({}) ", count);
 
     for (i, (key, value)) in fields.iter().enumerate() {
-        // Check if we need to truncate (leave room for "..." and "}")
+        // Check if we need to truncate (leave room for "...")
         if preview.len() + key.len() + 10 > max_chars {
             preview.push_str("...");
-            truncated = true;
             break;
         }
 
@@ -816,19 +814,19 @@ fn format_collapsed_object(
         preview.push_str(key);
         preview.push_str(": ");
 
-        // Add value
+        // Add value (YAML-style: no quotes on strings, descriptive nested previews)
         let value_str = match value.value() {
-            YamlValue::Object(_) => "{…}".to_string(),
-            YamlValue::Array(_) | YamlValue::MultiDoc(_) => "[…]".to_string(),
+            YamlValue::Object(nested) => format!("({})", nested.len()),
+            YamlValue::Array(items) | YamlValue::MultiDoc(items) => {
+                format!("[{}]", items.len())
+            }
             YamlValue::String(s) => {
                 let s_str = s.as_str();
-                let quoted = format!("\"{}\"", s_str);
-                if preview.len() + quoted.len() > max_chars {
-                    // Use char-based truncation to avoid UTF-8 boundary panics
+                if preview.len() + s_str.len() > max_chars {
                     let truncated: String = s_str.chars().take(10).collect();
-                    format!("\"{}...\"", truncated)
+                    format!("{}...", truncated)
                 } else {
-                    quoted
+                    s_str.to_string()
                 }
             }
             YamlValue::Number(n) => format_number_yaml(n),
@@ -846,17 +844,12 @@ fn format_collapsed_object(
         }
     }
 
-    // Close brace if we didn't truncate
-    if !truncated {
-        preview.push('}');
-    }
-
     preview
 }
 
 fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
     if elements.is_empty() {
-        return "[…]".to_string();
+        return "[0]".to_string();
     }
 
     let count = elements.len();
@@ -872,18 +865,17 @@ fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
         }
 
         let value_str = match element.value() {
-            YamlValue::Object(_) => "{…}".to_string(),
-            YamlValue::Array(_) | YamlValue::MultiDoc(_) => "[…]".to_string(),
+            YamlValue::Object(nested) => format!("({})", nested.len()),
+            YamlValue::Array(items) | YamlValue::MultiDoc(items) => {
+                format!("[{}]", items.len())
+            }
             YamlValue::String(s) => {
                 let s_str = s.as_str();
-                let quoted = format!("\"{}\"", s_str);
-                // Check length to avoid exceeding max_chars with long strings
-                if preview.len() + quoted.len() > max_chars {
-                    // Use char-based truncation to avoid UTF-8 boundary panics
+                if preview.len() + s_str.len() > max_chars {
                     let truncated_str: String = s_str.chars().take(10).collect();
-                    format!("\"{}...\"", truncated_str)
+                    format!("{}...", truncated_str)
                 } else {
-                    quoted
+                    s_str.to_string()
                 }
             }
             YamlValue::Number(n) => format_number_yaml(n),
@@ -1289,7 +1281,7 @@ mod tests {
         ));
 
         let preview = format_collapsed_preview(&obj, 100);
-        assert_eq!(preview, "(2) {id: 1, name: \"Alice\"}");
+        assert_eq!(preview, "(2) id: 1, name: Alice");
     }
 
     #[test]
@@ -1321,7 +1313,7 @@ mod tests {
         ));
 
         let preview = format_collapsed_preview(&obj, 100);
-        assert_eq!(preview, "(2) {id: 1, user: {…}}");
+        assert_eq!(preview, "(2) id: 1, user: (1)");
     }
 
     #[test]
@@ -1367,8 +1359,7 @@ mod tests {
             .collect(),
         ));
 
-        let preview = format_collapsed_preview(&obj, 40);
-        assert!(preview.len() <= 43); // Allow a bit of overflow for "..."
+        let preview = format_collapsed_preview(&obj, 30);
         assert!(preview.contains("..."));
     }
 
