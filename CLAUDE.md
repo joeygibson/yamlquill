@@ -394,7 +394,31 @@ cargo check
 
 ### Version Management
 
-**Note:** Version management will be added in Phase 5
+Use the `scripts/ver` script to manage version updates and create releases:
+
+```bash
+# Print current version
+./scripts/ver
+
+# Update to new version (validates format, updates files, commits, tags)
+./scripts/ver 0.3.0
+```
+
+### Updating GitHub Release Notes
+
+Use the `scripts/update-release` script to push release notes from a local file to a GitHub release:
+
+```bash
+# Update release v0.14.0 from release-notes-v0.14.0.md
+./scripts/update-release 0.14.0
+```
+
+The script will:
+1. Look for `release-notes-v<version>.md` in the project root
+2. Verify the GitHub release exists
+3. Update the release notes via `gh release edit`
+
+Accepts the version with or without the `v` prefix (`0.14.0` or `v0.14.0`).
 
 ## Configuration
 
