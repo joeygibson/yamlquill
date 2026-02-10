@@ -58,7 +58,13 @@ cargo clippy -- -D warnings
    ```
    All tests must pass (currently ~437 tests expected).
 
-4. **Documentation updates:**
+4. **Security audit:**
+   ```bash
+   cargo audit
+   ```
+   Must pass with no vulnerabilities. Fix or update affected dependencies before proceeding.
+
+5. **Documentation updates:**
    - Update CLAUDE.md if implementation changes project status
    - Update relevant plan documents if approach changes
    - Add research findings if investigation was performed
@@ -66,7 +72,7 @@ cargo clippy -- -D warnings
 ### Quick Check Command
 
 ```bash
-cargo fmt --check && cargo clippy -- -D warnings && cargo test
+cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo audit
 ```
 
 **Process:** Run all checks → Fix any failures → Verify again → THEN offer to commit.
@@ -465,7 +471,7 @@ cd ~/.config/superpowers/worktrees/yamlquill/feature-name
 
 1. **Verify code quality:**
    ```bash
-   cargo fmt --check && cargo clippy -- -D warnings && cargo test
+   cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo audit
    ```
 
 2. **Update documentation** (if needed):
