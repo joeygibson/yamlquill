@@ -797,11 +797,10 @@ fn format_collapsed_object(
     max_chars: usize,
 ) -> String {
     if fields.is_empty() {
-        return "(0)".to_string();
+        return "{}".to_string();
     }
 
-    let count = fields.len();
-    let mut preview = format!("({}) ", count);
+    let mut preview = String::new();
 
     for (i, (key, value)) in fields.iter().enumerate() {
         // Check if we need to truncate (leave room for "...")
@@ -815,10 +814,11 @@ fn format_collapsed_object(
         preview.push_str(": ");
 
         // Add value (YAML-style: no quotes on strings, descriptive nested previews)
+        let remaining = max_chars.saturating_sub(preview.len());
         let value_str = match value.value() {
-            YamlValue::Object(nested) => format!("({})", nested.len()),
+            YamlValue::Object(nested) => format_collapsed_object(nested, remaining),
             YamlValue::Array(items) | YamlValue::MultiDoc(items) => {
-                format!("[{}]", items.len())
+                format_collapsed_array(items, remaining)
             }
             YamlValue::String(s) => {
                 let s_str = s.as_str();
@@ -849,11 +849,19 @@ fn format_collapsed_object(
 
 fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
     if elements.is_empty() {
-        return "[0]".to_string();
+        return "[]".to_string();
     }
 
-    let count = elements.len();
-    let mut preview = format!("({}) [", count);
+    // Use " | " separator when array contains containers, ", " for scalars
+    let has_containers = elements.iter().any(|e| {
+        matches!(
+            e.value(),
+            YamlValue::Object(_) | YamlValue::Array(_) | YamlValue::MultiDoc(_)
+        )
+    });
+    let separator = if has_containers { " | " } else { ", " };
+
+    let mut preview = "[".to_string();
     let mut truncated = false;
 
     for (i, element) in elements.iter().enumerate() {
@@ -864,10 +872,11 @@ fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
             break;
         }
 
+        let remaining = max_chars.saturating_sub(preview.len());
         let value_str = match element.value() {
-            YamlValue::Object(nested) => format!("({})", nested.len()),
+            YamlValue::Object(nested) => format_collapsed_object(nested, remaining),
             YamlValue::Array(items) | YamlValue::MultiDoc(items) => {
-                format!("[{}]", items.len())
+                format_collapsed_array(items, remaining)
             }
             YamlValue::String(s) => {
                 let s_str = s.as_str();
@@ -888,7 +897,7 @@ fn format_collapsed_array(elements: &[YamlNode], max_chars: usize) -> String {
         preview.push_str(&value_str);
 
         if i < elements.len() - 1 {
-            preview.push_str(", ");
+            preview.push_str(separator);
         }
     }
 
@@ -1281,7 +1290,7 @@ mod tests {
         ));
 
         let preview = format_collapsed_preview(&obj, 100);
-        assert_eq!(preview, "(2) id: 1, name: Alice");
+        assert_eq!(preview, "id: 1, name: Alice");
     }
 
     #[test]
@@ -1313,7 +1322,7 @@ mod tests {
         ));
 
         let preview = format_collapsed_preview(&obj, 100);
-        assert_eq!(preview, "(2) id: 1, user: (1)");
+        assert_eq!(preview, "id: 1, user: name: Alice");
     }
 
     #[test]
@@ -1327,7 +1336,7 @@ mod tests {
         ]));
 
         let preview = format_collapsed_preview(&arr, 100);
-        assert_eq!(preview, "(3) [1, 2, 3]");
+        assert_eq!(preview, "[1, 2, 3]");
     }
 
     #[test]
