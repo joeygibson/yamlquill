@@ -92,7 +92,7 @@ generate_github_release_notes() {
 
     # Start building the release notes
     local notes=""
-    notes+="# jsonquill v$new_version\n\n"
+    notes+="# yamlquill v$new_version\n\n"
     notes+="**Release Date:** $date\n\n"
 
     # New Features section
@@ -186,7 +186,7 @@ generate_github_release_notes() {
 
     # Full changelog link
     notes+="---\n\n"
-    notes+="**Full Changelog**: https://github.com/joeygibson/jsonquill/compare/v$current_version...v$new_version\n"
+    notes+="**Full Changelog**: https://github.com/joeygibson/yamlquill/compare/v$current_version...v$new_version\n"
 
     echo -e "$notes"
 }

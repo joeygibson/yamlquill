@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Version management script for jsonquill
+# Version management script for yamlquill
 
 set -e
 
@@ -214,7 +214,7 @@ generate_github_release_notes() {
 
     # Start building the release notes
     local notes=""
-    notes+="# jsonquill v$new_version\n\n"
+    notes+="# yamlquill v$new_version\n\n"
     notes+="**Release Date:** $date\n\n"
 
     # New Features section
@@ -308,7 +308,7 @@ generate_github_release_notes() {
 
     # Full changelog link
     notes+="---\n\n"
-    notes+="**Full Changelog**: https://github.com/joeygibson/jsonquill/compare/v$current_version...v$new_version\n"
+    notes+="**Full Changelog**: https://github.com/joeygibson/yamlquill/compare/v$current_version...v$new_version\n"
 
     echo -e "$notes"
 }
@@ -353,11 +353,11 @@ update_changelog() {
         local prev_version=$(grep "^\[$current_version\]:" CHANGELOG.md | sed 's/.*v\([0-9.]*\)\.\.\.v.*/\1/')
 
         # Update the current version link to have the new version as its end point
-        sed -i.bak "s|^\[$current_version\]:.*|\[$current_version\]: https://github.com/yourusername/jsonquill/compare/v${prev_version}...v$current_version|" CHANGELOG.md
+        sed -i.bak "s|^\[$current_version\]:.*|\[$current_version\]: https://github.com/yourusername/yamlquill/compare/v${prev_version}...v$current_version|" CHANGELOG.md
         rm CHANGELOG.md.bak
 
         # Add the new version link at the end (before the last line if it exists)
-        echo "[$new_version]: https://github.com/yourusername/jsonquill/compare/v$current_version...v$new_version" >> CHANGELOG.md
+        echo "[$new_version]: https://github.com/yourusername/yamlquill/compare/v$current_version...v$new_version" >> CHANGELOG.md
     fi
 
     echo -e "${GREEN}Updated CHANGELOG.md with v$new_version entry${NC}"
