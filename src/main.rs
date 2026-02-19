@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use ratatui::Terminal;
 use std::io::{self, IsTerminal};
+use std::path::Path;
 use std::time::Duration;
 
 use yamlquill::document::node::{YamlNode, YamlValue};
@@ -151,9 +152,15 @@ fn main() -> Result<()> {
     // Load file or create empty document BEFORE terminal setup
     // (stdin might be used for YAML data, so we need to read it before taking over the terminal)
     let (tree, filename, _stdin_was_piped) = if let Some(file_path) = cli.file {
-        // Load from file
-        let tree = load_yaml_file(&file_path)?;
-        (tree, Some(file_path), false)
+        // Load from file, or create empty document if file doesn't exist
+        if Path::new(&file_path).exists() {
+            let tree = load_yaml_file(&file_path)?;
+            (tree, Some(file_path), false)
+        } else {
+            use indexmap::IndexMap;
+            let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::new())));
+            (tree, Some(file_path), false)
+        }
     } else {
         // No filename provided - check if stdin has piped data
         if !io::stdin().is_terminal() {
