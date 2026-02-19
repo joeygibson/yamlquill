@@ -2261,23 +2261,47 @@ impl EditorState {
         self.temp_container.is_some()
     }
 
-    /// Pastes nodes at cursor from register (after current position).
-    pub fn paste_nodes_at_cursor(&mut self) -> anyhow::Result<()> {
+    /// Resolves paste content from the appropriate register, falling back to the
+    /// system clipboard when the unnamed register is empty.
+    fn resolve_paste_content(&self) -> anyhow::Result<crate::editor::registers::RegisterContent> {
+        use crate::editor::registers::RegisterContent;
         use anyhow::anyhow;
 
-        // Get content from appropriate register
-        let content = if let Some(reg) = self.pending_register {
-            self.registers
+        if let Some(reg) = self.pending_register {
+            // Named/numbered register — never fall back to clipboard
+            return self
+                .registers
                 .get(reg)
-                .ok_or_else(|| anyhow!("Nothing in register '{}'", reg))?
-                .clone()
-        } else {
-            self.registers.get_unnamed().clone()
-        };
+                .ok_or_else(|| anyhow!("Nothing in register '{}'", reg))
+                .cloned();
+        }
 
-        if content.is_empty() {
+        // Unnamed register
+        let content = self.registers.get_unnamed().clone();
+        if !content.is_empty() {
+            return Ok(content);
+        }
+
+        // Unnamed register is empty — try reading from system clipboard
+        let clipboard_text = arboard::Clipboard::new()
+            .and_then(|mut c| c.get_text())
+            .map_err(|_| anyhow!("Nothing to paste"))?;
+
+        if clipboard_text.trim().is_empty() {
             return Err(anyhow!("Nothing to paste"));
         }
+
+        // Try to parse clipboard text as YAML
+        use crate::document::parser::parse_yaml;
+        let root = parse_yaml(&clipboard_text)
+            .map_err(|_| anyhow!("Clipboard does not contain valid YAML"))?;
+
+        Ok(RegisterContent::new(vec![root], vec![None]))
+    }
+
+    /// Pastes nodes at cursor from register (after current position).
+    pub fn paste_nodes_at_cursor(&mut self) -> anyhow::Result<()> {
+        let content = self.resolve_paste_content()?;
 
         // Paste each node
         for (node, key) in content.nodes.iter().zip(content.keys.iter()) {
@@ -2297,20 +2321,7 @@ impl EditorState {
 
     /// Pastes nodes before cursor from register.
     pub fn paste_nodes_before_cursor(&mut self) -> anyhow::Result<()> {
-        use anyhow::anyhow;
-
-        let content = if let Some(reg) = self.pending_register {
-            self.registers
-                .get(reg)
-                .ok_or_else(|| anyhow!("Nothing in register '{}'", reg))?
-                .clone()
-        } else {
-            self.registers.get_unnamed().clone()
-        };
-
-        if content.is_empty() {
-            return Err(anyhow!("Nothing to paste"));
-        }
+        let content = self.resolve_paste_content()?;
 
         for (node, key) in content.nodes.iter().zip(content.keys.iter()) {
             self.paste_single_node(node.clone(), key.clone(), false)?;
@@ -2411,8 +2422,25 @@ impl EditorState {
             }
         }
 
-        // Handle root-level paste: insert inside root container
+        // Handle root-level paste: replace root if empty, otherwise insert inside
         if current_path.is_empty() {
+            // If root is an empty container, replace it entirely with the pasted node
+            let root_is_empty = match self.tree.root().value() {
+                YamlValue::Object(entries) => entries.is_empty(),
+                YamlValue::Array(elements) => elements.is_empty(),
+                _ => false,
+            };
+            if root_is_empty {
+                *self.tree.root_mut() = node;
+                // Expand root if it's a container
+                if self.tree.root().value().is_container() && !self.tree_view().is_expanded(&[]) {
+                    self.tree_view_mut().toggle_expand(&[]);
+                }
+                self.rebuild_tree_view();
+                self.cursor.set_path(vec![]);
+                return Ok(());
+            }
+
             match self.tree.root().value() {
                 YamlValue::Object(_) => {
                     // For objects, need a key
@@ -5010,6 +5038,98 @@ mod tests {
         let result = state.paste_nodes_at_cursor();
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_paste_replaces_empty_root_object() {
+        use indexmap::IndexMap;
+        // Start with empty root object
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(IndexMap::new())));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Populate unnamed register with a document
+        let mut obj = IndexMap::new();
+        obj.insert(
+            "name".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("Alice".to_string()))),
+        );
+        obj.insert(
+            "age".to_string(),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(30.0))),
+        );
+        let pasted = YamlNode::new(YamlValue::Object(obj));
+        let content = crate::editor::registers::RegisterContent::new(vec![pasted], vec![None]);
+        state.registers.set_unnamed(content);
+
+        // Paste — should replace empty root, not insert under "pasted" key
+        let result = state.paste_nodes_at_cursor();
+        assert!(result.is_ok());
+
+        // Root should now be an object with "name" and "age"
+        match state.tree().root().value() {
+            YamlValue::Object(entries) => {
+                assert_eq!(entries.len(), 2);
+                assert!(entries.contains_key("name"));
+                assert!(entries.contains_key("age"));
+            }
+            _ => panic!("Root should be an object"),
+        }
+    }
+
+    #[test]
+    fn test_paste_replaces_empty_root_array() {
+        // Start with empty root array
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Array(vec![])));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Populate unnamed register with an array
+        let pasted = YamlNode::new(YamlValue::Array(vec![
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(1.0))),
+            YamlNode::new(YamlValue::Number(YamlNumber::Float(2.0))),
+        ]));
+        let content = crate::editor::registers::RegisterContent::new(vec![pasted], vec![None]);
+        state.registers.set_unnamed(content);
+
+        let result = state.paste_nodes_at_cursor();
+        assert!(result.is_ok());
+
+        // Root should now be an array with 2 elements
+        match state.tree().root().value() {
+            YamlValue::Array(elements) => {
+                assert_eq!(elements.len(), 2);
+            }
+            _ => panic!("Root should be an array"),
+        }
+    }
+
+    #[test]
+    fn test_paste_into_nonempty_root_does_not_replace() {
+        use indexmap::IndexMap;
+        // Root object with existing content
+        let mut obj = IndexMap::new();
+        obj.insert(
+            "existing".to_string(),
+            YamlNode::new(YamlValue::String(YamlString::Plain("value".to_string()))),
+        );
+        let tree = YamlTree::new(YamlNode::new(YamlValue::Object(obj)));
+        let mut state = EditorState::new_with_default_theme(tree);
+
+        // Populate unnamed register
+        let node = YamlNode::new(YamlValue::String(YamlString::Plain("new".to_string())));
+        let content = crate::editor::registers::RegisterContent::new(vec![node], vec![None]);
+        state.registers.set_unnamed(content);
+
+        let result = state.paste_nodes_at_cursor();
+        assert!(result.is_ok());
+
+        // Root should still have "existing" plus the pasted node
+        match state.tree().root().value() {
+            YamlValue::Object(entries) => {
+                assert_eq!(entries.len(), 2);
+                assert!(entries.contains_key("existing"));
+            }
+            _ => panic!("Root should be an object"),
+        }
     }
 
     #[test]
