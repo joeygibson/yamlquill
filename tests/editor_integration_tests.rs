@@ -603,6 +603,9 @@ fn test_paste_empty_register_returns_error() {
     let mut state = create_test_editor(tree);
 
     // Try to paste without yanking anything first
+    // Use a named register to avoid clipboard fallback (which can have
+    // content on CI runners, especially Windows)
+    state.set_pending_register('z', false);
     state.cursor_mut().set_path(vec![0]);
     let result = state.paste_node_at_cursor();
 
