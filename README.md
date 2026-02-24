@@ -37,6 +37,7 @@ A terminal-based structural YAML editor with vim-style keybindings.
 - 15 built-in color themes
 - Line numbers (absolute and relative)
 - Configuration file support
+- Horizontal scrolling (zh/zl, zH/zL, zs/ze; auto-scrolls to search matches; resets on vertical movement)
 - Mouse/trackpad scrolling support
 - Gzip compression support (transparent `.yaml.gz` handling)
 - Section-level format preservation (unmodified sections survive save verbatim)
@@ -176,6 +177,12 @@ yamlquill config.yaml
 | `zz` | Center cursor on screen | Scroll viewport to center current line |
 | `zt` | Move cursor to top of screen | Scroll viewport to place current line at top |
 | `zb` | Move cursor to bottom of screen | Scroll viewport to place current line at bottom |
+| `zh` | Scroll left 1 column | Horizontal scroll left (count prefix supported, e.g., `10zh`) |
+| `zl` | Scroll right 1 column | Horizontal scroll right (count prefix supported) |
+| `zH` | Scroll left half-screen | Horizontal scroll left by half viewport width |
+| `zL` | Scroll right half-screen | Horizontal scroll right by half viewport width |
+| `zs` | Scroll cursor to left edge | Align cursor line content to left edge |
+| `ze` | Scroll cursor to right edge | Align cursor line content to right edge |
 | `}` | Jump to next sibling | Move to the next node at the same level |
 | `{` | Jump to previous sibling | Move to the previous node at the same level |
 | `0` / `^` | Jump to first sibling | Move to first node at current level |

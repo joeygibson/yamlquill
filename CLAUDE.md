@@ -345,6 +345,7 @@ cargo test test_parse_simple_yaml
 - `tests/anchor_alias_extraction_tests.rs` - Anchor/alias parsing and editing constraints
 - `tests/multi_document_tests.rs` - Multi-document YAML support
 - `tests/navigation_tests.rs` - Tree navigation
+- `tests/horizontal_scroll_tests.rs` - Horizontal scrolling
 - `tests/yaml_display_tests.rs` - Type-aware display
 - `tests/yaml_editing_tests.rs` - Value editing operations
 

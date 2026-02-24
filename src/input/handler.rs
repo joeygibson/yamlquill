@@ -665,6 +665,42 @@ impl InputHandler {
                                 state.collapse_all_at_cursor();
                                 return Ok(false);
                             }
+                            'h' => {
+                                let count = state.get_count() as usize;
+                                state.clear_pending();
+                                state.scroll_left(count);
+                                return Ok(false);
+                            }
+                            'l' => {
+                                let count = state.get_count() as usize;
+                                state.clear_pending();
+                                state.scroll_right(count);
+                                return Ok(false);
+                            }
+                            'H' => {
+                                let count = state.get_count() as usize;
+                                let half_width = state.viewport_width() / 2;
+                                state.clear_pending();
+                                state.scroll_left(half_width.saturating_mul(count));
+                                return Ok(false);
+                            }
+                            'L' => {
+                                let count = state.get_count() as usize;
+                                let half_width = state.viewport_width() / 2;
+                                state.clear_pending();
+                                state.scroll_right(half_width.saturating_mul(count));
+                                return Ok(false);
+                            }
+                            's' => {
+                                state.clear_pending();
+                                state.scroll_cursor_to_left_edge();
+                                return Ok(false);
+                            }
+                            'e' => {
+                                state.clear_pending();
+                                state.scroll_cursor_to_right_edge();
+                                return Ok(false);
+                            }
                             _ => {
                                 // Not a screen positioning or fold command, continue with normal processing
                             }

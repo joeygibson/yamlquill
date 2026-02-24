@@ -234,6 +234,8 @@ pub struct EditorState {
     pending_command: Option<char>,
     pending_count: Option<u32>,
     scroll_offset: usize,
+    horizontal_offset: usize,
+    viewport_width: usize,
     viewport_height: usize,
     undo_tree: super::undo::UndoTree,
     add_mode_stage: AddModeStage,
@@ -345,6 +347,8 @@ impl EditorState {
             pending_command: None,
             pending_count: None,
             scroll_offset: 0,
+            horizontal_offset: 0,
+            viewport_width: 0,
             viewport_height: 20,
             undo_tree,
             add_mode_stage: AddModeStage::None,
@@ -938,6 +942,7 @@ impl EditorState {
             // If cursor not found, go to first line
             self.cursor.set_path(lines[0].path.clone());
         }
+        self.horizontal_offset = 0;
     }
 
     /// Moves the cursor up to the previous visible line in the tree view.
@@ -987,6 +992,7 @@ impl EditorState {
         } else if !lines.is_empty() {
             self.cursor.set_path(lines[0].path.clone());
         }
+        self.horizontal_offset = 0;
     }
 
     /// Toggles expand/collapse at the current cursor position and rebuilds the tree view.
@@ -1097,12 +1103,137 @@ impl EditorState {
         }
     }
 
+    /// Returns the current horizontal scroll offset (columns scrolled right).
+    pub fn horizontal_offset(&self) -> usize {
+        self.horizontal_offset
+    }
+
+    /// Sets the horizontal scroll offset.
+    pub fn set_horizontal_offset(&mut self, offset: usize) {
+        self.horizontal_offset = offset;
+    }
+
+    /// Resets the horizontal scroll offset to zero.
+    pub fn reset_horizontal_offset(&mut self) {
+        self.horizontal_offset = 0;
+    }
+
+    /// Scrolls right by incrementing the horizontal offset.
+    pub fn scroll_right(&mut self, count: usize) {
+        self.horizontal_offset = self.horizontal_offset.saturating_add(count);
+    }
+
+    /// Scrolls left by decrementing the horizontal offset.
+    pub fn scroll_left(&mut self, count: usize) {
+        self.horizontal_offset = self.horizontal_offset.saturating_sub(count);
+    }
+
+    /// Returns the current viewport width in columns.
+    pub fn viewport_width(&self) -> usize {
+        self.viewport_width
+    }
+
+    /// Sets the viewport width.
+    pub fn set_viewport_width(&mut self, width: usize) {
+        self.viewport_width = width;
+    }
+
+    /// Calculates the display width of the current cursor line (in characters).
+    pub fn cursor_line_display_width(&self) -> usize {
+        let lines = self.tree_view.lines();
+        let current_path = self.cursor.path();
+        if let Some(line) = lines.iter().find(|l| l.path == current_path) {
+            let indent = line.depth * 2; // "  " per depth level
+            let indicator = 2; // expand/collapse indicator or spacing
+            let key_len = line.key.as_ref().map(|k| k.len() + 2).unwrap_or(0); // "key: "
+            let value_len = line.value_preview.len();
+            indent + indicator + key_len + value_len
+        } else {
+            0
+        }
+    }
+
+    /// Scrolls so that the cursor line content starts at the left edge of the viewport (zs).
+    pub fn scroll_cursor_to_left_edge(&mut self) {
+        let lines = self.tree_view.lines();
+        if let Some(line) = lines.iter().find(|l| l.path == self.cursor.path()) {
+            let indent = line.depth * 2;
+            self.horizontal_offset = indent;
+        }
+    }
+
+    /// Scrolls so that the cursor line content ends at the right edge of the viewport (ze).
+    pub fn scroll_cursor_to_right_edge(&mut self) {
+        let width = self.cursor_line_display_width();
+        if width > self.viewport_width {
+            self.horizontal_offset = width - self.viewport_width;
+        } else {
+            self.horizontal_offset = 0;
+        }
+    }
+
+    /// Adjusts horizontal scroll so the search match text is visible in the viewport.
+    fn adjust_horizontal_for_search(&mut self) {
+        if self.search_buffer.is_empty() || self.viewport_width == 0 {
+            return;
+        }
+
+        let lines = self.tree_view.lines();
+        let line = match lines.iter().find(|l| l.path == self.cursor.path()) {
+            Some(l) => l,
+            None => return,
+        };
+
+        // Build the full rendered text for this line (matching render_tree_view structure)
+        let indent = "  ".repeat(line.depth);
+        let indicator = if line.expandable {
+            if line.expanded {
+                "\u{25bc} "
+            } else {
+                "\u{25b6} "
+            }
+        } else {
+            "  "
+        };
+        let key_part = line
+            .key
+            .as_ref()
+            .map(|k| format!("{}: ", k))
+            .unwrap_or_default();
+        let full_text = format!("{}{}{}{}", indent, indicator, key_part, line.value_preview);
+
+        // Find the match position (case-insensitive if search was case-insensitive)
+        let case_sensitive = self.search_buffer.chars().any(|c| c.is_uppercase());
+        let match_pos = if case_sensitive {
+            full_text.find(&self.search_buffer)
+        } else {
+            full_text
+                .to_lowercase()
+                .find(&self.search_buffer.to_lowercase())
+        };
+
+        if let Some(pos) = match_pos {
+            let match_end = pos + self.search_buffer.len();
+            // If match is off-screen to the right
+            if match_end > self.horizontal_offset + self.viewport_width {
+                let margin = self.viewport_width / 4;
+                self.horizontal_offset = pos.saturating_sub(margin);
+            }
+            // If match is off-screen to the left
+            if pos < self.horizontal_offset {
+                let margin = self.viewport_width / 4;
+                self.horizontal_offset = pos.saturating_sub(margin);
+            }
+        }
+    }
+
     /// Jumps to the first line in the tree.
     pub fn jump_to_top(&mut self) {
         let lines = self.tree_view.lines();
         if let Some(first_line) = lines.first() {
             self.cursor.set_path(first_line.path.clone());
             self.scroll_offset = 0;
+            self.horizontal_offset = 0;
         }
     }
 
@@ -1112,6 +1243,7 @@ impl EditorState {
         if let Some(last_line) = lines.last() {
             self.cursor.set_path(last_line.path.clone());
         }
+        self.horizontal_offset = 0;
     }
 
     /// Jumps to a specific line number (1-based).
@@ -1126,6 +1258,7 @@ impl EditorState {
         let idx = line_num - 1; // Convert to 0-based index
         if let Some(line) = lines.get(idx) {
             self.cursor.set_path(line.path.clone());
+            self.horizontal_offset = 0;
         }
     }
 
@@ -1159,6 +1292,7 @@ impl EditorState {
         // Move cursor down by the same amount to maintain screen position
         let new_cursor_idx = (current_idx + scroll_amount).min(lines.len() - 1);
         self.cursor.set_path(lines[new_cursor_idx].path.clone());
+        self.horizontal_offset = 0;
     }
 
     /// Scrolls up one page (half viewport height).
@@ -1189,6 +1323,7 @@ impl EditorState {
         // Move cursor up by the same amount to maintain screen position
         let new_cursor_idx = current_idx.saturating_sub(scroll_amount);
         self.cursor.set_path(lines[new_cursor_idx].path.clone());
+        self.horizontal_offset = 0;
     }
 
     /// Scrolls down by a full page (viewport_height lines).
@@ -1221,6 +1356,7 @@ impl EditorState {
         // Move cursor down by the same amount to maintain screen position
         let new_cursor_idx = (current_idx + scroll_amount).min(lines.len() - 1);
         self.cursor.set_path(lines[new_cursor_idx].path.clone());
+        self.horizontal_offset = 0;
     }
 
     /// Scrolls up by a full page (viewport_height lines).
@@ -1251,6 +1387,7 @@ impl EditorState {
         // Move cursor up by the same amount to maintain screen position
         let new_cursor_idx = current_idx.saturating_sub(scroll_amount);
         self.cursor.set_path(lines[new_cursor_idx].path.clone());
+        self.horizontal_offset = 0;
     }
 
     /// Centers the current cursor line on the screen (zz command).
@@ -1279,6 +1416,7 @@ impl EditorState {
         // Ensure we don't scroll past the end
         let max_scroll = lines.len().saturating_sub(self.viewport_height);
         self.scroll_offset = self.scroll_offset.min(max_scroll);
+        self.horizontal_offset = 0;
     }
 
     /// Positions the current cursor line at the top of the screen (zt command).
@@ -1298,6 +1436,7 @@ impl EditorState {
 
         // Set scroll offset so cursor is at top
         self.scroll_offset = cursor_idx;
+        self.horizontal_offset = 0;
     }
 
     /// Positions the current cursor line at the bottom of the screen (zb command).
@@ -1321,6 +1460,7 @@ impl EditorState {
 
         // Set scroll offset so cursor is at bottom
         self.scroll_offset = cursor_idx.saturating_sub(self.viewport_height - 1);
+        self.horizontal_offset = 0;
     }
 
     /// Moves the cursor to the next sibling node.
@@ -1375,6 +1515,7 @@ impl EditorState {
         // Check if this path exists in the tree
         if self.tree.get_node(&next_path).is_some() {
             self.cursor.set_path(next_path);
+            self.horizontal_offset = 0;
         }
         // If it doesn't exist, we're at the last sibling - do nothing
     }
@@ -1423,6 +1564,7 @@ impl EditorState {
         // Check if this path exists in the tree
         if self.tree.get_node(&first_path).is_some() {
             self.cursor.set_path(first_path);
+            self.horizontal_offset = 0;
         }
     }
 
@@ -1491,6 +1633,7 @@ impl EditorState {
         last_path[last_idx] = sibling_count - 1;
 
         self.cursor.set_path(last_path);
+        self.horizontal_offset = 0;
     }
 
     /// Moves the cursor to the previous sibling node.
@@ -1552,6 +1695,7 @@ impl EditorState {
         // Check if this path exists in the tree (should always exist if index > 0)
         if self.tree.get_node(&prev_path).is_some() {
             self.cursor.set_path(prev_path);
+            self.horizontal_offset = 0;
         }
     }
 
@@ -1589,6 +1733,7 @@ impl EditorState {
             for line in &lines[idx + 1..] {
                 if line.depth <= current_depth {
                     self.cursor.set_path(line.path.clone());
+                    self.horizontal_offset = 0;
                     return;
                 }
             }
@@ -1625,6 +1770,7 @@ impl EditorState {
         // Parent path is current path minus the last index
         let parent_path = &current_path[..current_path.len() - 1];
         self.cursor.set_path(parent_path.to_vec());
+        self.horizontal_offset = 0;
     }
 
     /// Moves to the previous node at the same depth or shallower (b command).
@@ -1659,6 +1805,7 @@ impl EditorState {
             for line in lines[..idx].iter().rev() {
                 if line.depth <= current_depth {
                     self.cursor.set_path(line.path.clone());
+                    self.horizontal_offset = 0;
                     return;
                 }
             }
@@ -2764,6 +2911,7 @@ impl EditorState {
                 self.cursor
                     .set_path(self.search_results[self.search_index].clone());
             }
+            self.adjust_horizontal_for_search();
         }
     }
 
@@ -2824,6 +2972,8 @@ impl EditorState {
         }
         self.cursor
             .set_path(self.search_results[self.search_index].clone());
+        self.horizontal_offset = 0;
+        self.adjust_horizontal_for_search();
         (true, wrapped)
     }
 
