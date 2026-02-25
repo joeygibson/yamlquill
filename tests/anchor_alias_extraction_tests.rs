@@ -3,7 +3,7 @@
 //! These tests validate the hybrid parsing approach that uses Scanner
 //! to extract anchor/alias names and correlates them with the parsed tree.
 
-use yamlquill::document::node::{YamlNumber, YamlString, YamlValue};
+use yamlquill::document::node::YamlValue;
 use yamlquill::document::parser::parse_yaml_auto;
 
 #[test]
