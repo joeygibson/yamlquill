@@ -19,6 +19,8 @@ pub enum BackendEvent {
     Key(BackendKey),
     /// A mouse event occurred
     Mouse(BackendMouse),
+    /// Terminal was resized to (width, height).
+    Resize(u16, u16),
 }
 
 /// A backend-agnostic key event.
